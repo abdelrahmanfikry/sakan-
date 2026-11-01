@@ -151,8 +151,9 @@ function renderNoHouse(){
    <div class="card" style="text-align:right;display:grid;gap:12px">
      <label class="f">عندك كود دعوة؟<input id="jCode" dir="ltr" placeholder="ABC123" maxlength="6" style="text-transform:uppercase;letter-spacing:.2em;text-align:center"></label>
      <button class="btn" id="jGo">انضم</button></div>
-   <button class="btn ghost sm" id="lo" style="justify-self:center">${icon("logout")} خروج</button></div></div>`;
+   ${S.hid?`<button class="btn sm" id="nhBack" style="justify-self:center">رجوع للسكن</button>`:""}<button class="btn ghost sm" id="lo" style="justify-self:center">${icon("logout")} خروج</button></div></div>`;
   root.querySelector("#nhCreate").onclick=createHouse;
+  const bk=root.querySelector("#nhBack"); bk&&(bk.onclick=()=>render());
   root.querySelector("#jGo").onclick=()=>{ const c=root.querySelector("#jCode").value.trim().toUpperCase(); if(c.length!==6) return toast("الكود 6 حروف"); joinFlow(c); };
   root.querySelector("#lo").onclick=()=>signOut(auth);
 }
@@ -164,7 +165,7 @@ async function createHouse(){
   b.set(doc(db,"houses",hid,"users",u.uid),{role:"admin", name:u.displayName||"", email:u.email||"", photo:u.photoURL||"", joinedAt:iso()});
   b.set(doc(db,"codes",code),{hid});
   b.set(doc(db,"memberships",u.uid),{houses:{[hid]:name}},{merge:true});
-  store.set("sakan-house",hid); try{ await b.commit(); toast("السكن اتعمل — ضيف السكان من «الأعضاء»"); }catch(e){ fail(e); }
+  store.set("sakan-house",hid); try{ await b.commit(); openHouse(hid); toast("السكن اتعمل — ضيف السكان من «الأعضاء»"); }catch(e){ fail(e); }
 }
 async function joinFlow(code){
   try{
@@ -175,7 +176,7 @@ async function joinFlow(code){
     await setDoc(doc(db,"houses",hid,"users",u.uid),{role:"member", joinCode:code, name:u.displayName||"", email:u.email||"", photo:u.photoURL||"", joinedAt:iso()});
     const h=await getDoc(doc(db,"houses",hid));
     await setDoc(doc(db,"memberships",u.uid),{houses:{[hid]:h.exists()?h.data().name:"سكن"}},{merge:true});
-    toast("أهلًا بيك في السكن! اختار اسمك من القائمة");
+    openHouse(hid); toast("أهلًا بيك في السكن! اختار اسمك من القائمة");
   }catch(e){ console.error(e); toast("ما قدرناش ندخلك — الكود اتغيّر أو الانضمام مقفول"); if(!S.hid) renderNoHouse(); }
 }
 
@@ -210,6 +211,7 @@ function render(){
      ${items.map(navBtn).join("")}
      <div class="grow"></div>
      ${houses.length>1?`<select id="houseSel" aria-label="تبديل السكن">${houses.map(([id,n])=>`<option value="${id}" ${id===S.hid?"selected":""}>${esc(n)}</option>`).join("")}</select>`:""}
+     <button class="nav-btn" data-act="newHouse">${icon("plus")}<span>سكن جديد أو انضم بكود</span></button>
      <button class="nav-btn" data-act="theme">${icon(isDark()?"sun":"moon")}<span>${isDark()?"الوضع الفاتح":"الوضع الغامق"}</span></button>
      <div class="me"><img class="avatar" alt="" src="${esc(S.user.photoURL||"")}" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'"><div><b>${esc(S.user.displayName||"")}</b><span class="tiny">${myMember()?esc(mName(myMember())):"مش مربوط باسم"}</span></div><button class="btn icon ghost" data-act="logout" title="خروج">${icon("logout")}</button></div>
    </aside>
@@ -777,9 +779,10 @@ function quickSheet(){
 function moreSheet(){
   const tabs=["home","expenses","payments","members"]; const rest=navItems().filter(i=>!tabs.includes(i[0]));
   modal(`<h3>كل الأقسام<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="sheet-grid">${rest.map(([v,l,ic])=>`<button data-gv="${v}"><span class="ic-round acc">${icon(ic)}</span>${l}${badgeFor(v)?` <span class="chip neg">${badgeFor(v)}</span>`:""}</button>`).join("")}
+   <button data-gv="@new"><span class="ic-round">${icon("plus")}</span>سكن جديد أو انضم بكود</button>
    <button data-gv="@logout"><span class="ic-round">${icon("logout")}</span>خروج</button></div>
    ${Object.keys(S.memberships).length>1?`<label class="f" style="margin-top:14px">تبديل السكن<select id="hsM">${Object.entries(S.memberships).map(([id,n])=>`<option value="${id}" ${id===S.hid?"selected":""}>${esc(n)}</option>`).join("")}</select></label>`:""}`,ov=>{
-    ov.querySelector(".sheet-grid").onclick=e=>{ const b=e.target.closest("[data-gv]"); if(!b) return; if(b.dataset.gv==="@logout"){ closeModal(); return signOut(auth); } go(b.dataset.gv); };
+    ov.querySelector(".sheet-grid").onclick=e=>{ const b=e.target.closest("[data-gv]"); if(!b) return; if(b.dataset.gv==="@logout"){ closeModal(); return signOut(auth); } if(b.dataset.gv==="@new"){ closeModal(); return renderNoHouse(); } go(b.dataset.gv); };
     const hs=ov.querySelector("#hsM"); hs&&(hs.onchange=()=>{ closeModal(); openHouse(hs.value); }); });
 }
 function summaryText(){
@@ -819,6 +822,7 @@ function handle(a,b={dataset:{}}){
   const id=b.dataset?.id; const E=S.expenses.find(x=>x.id===id), P=S.payments.find(x=>x.id===id), M=S.roster.find(x=>x.id===id);
   switch(a){
     case "theme": return toggleTheme();
+    case "newHouse": return renderNoHouse();
     case "logout": return signOut(auth);
     case "quick": return quickSheet();
     case "more": return moreSheet();
