@@ -21,6 +21,13 @@ export const FEATURES = [
   ["activity","سجل النشاط","مين عمل إيه وإمتى"],
   ["statement","كشف الحساب","حركات كل ساكن بالرصيد التراكمي"],
   ["summary","ملخص الشهر","نص جاهز بالأرقام والتسويات للمشاركة على واتساب"],
+  ["notifications","الإشعارات","تنبيهات بكل جديد يخصك، وإشعار على الجهاز"],
+  ["guests","الضيوف","الضيف بيزوّد حصة اللي مستضيفه في المصاريف"],
+  ["closing","قفل الشهر والتقرير","قفل حساب الشهر وتقرير يتطبع أو يتحفظ PDF"],
+  ["loans","السلف بين السكان","فلوس شخصية بين السكان منفصلة عن حسابات الشقة"],
+  ["audit","سجل التعديلات","كل إضافة وتعديل وحذف ومين عمله"],
+  ["autoRecurring","إضافة الفواتير الثابتة تلقائيًا","تتسجّل لوحدها يوم استحقاقها لما مدير يفتح الموقع"],
+  ["quickAdd","الإضافة بجملة","تكتب «أحمد دفع 300 أكل على الكل» والمصروف يتملي لوحده"],
 ];
 export const DEFAULT_FEATURES = Object.fromEntries(FEATURES.map(([k]) => [k, k !== "fund"]));
 
@@ -34,6 +41,8 @@ export const PERMS = [
   ["memberPolls", true, "العضو يعمل تصويت", ""],
   ["memberMeters", true, "العضو يسجّل قراءة عداد", ""],
   ["memberFund", true, "العضو يسجّل اشتراكه في الصندوق", "بتستنى تأكيد المدير"],
+  ["memberGuests", true, "العضو يسجّل ضيوفه", ""],
+  ["memberLoans", true, "العضو يسجّل سلف", "السلفة بتستنى تأكيد اللي استلم الفلوس"],
   ["autoJoin", true, "الانضمام بالكود مفتوح", "لو مقفولة، كود الدعوة مش هيدخّل حد جديد"],
 ];
 export const DEFAULT_PERMS = Object.fromEntries(PERMS.map(([k, d]) => [k, d]));
@@ -87,20 +96,33 @@ const P = {
   download: '<path d="M12 4v11M7 10l5 5 5-5M4 20h16"/>',
   share: '<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="m8.2 10.8 7.6-3.6M8.2 13.2l7.6 3.6"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  bell: '<path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  hand: '<ellipse cx="9" cy="7" rx="6" ry="3"/><path d="M3 7v4c0 1.7 2.7 3 6 3s6-1.3 6-3V7"/><path d="M9 14v3c0 1.7 2.7 3 6 3s6-1.3 6-3v-4c0-1.7-2.7-3-6-3"/>',
+  guest: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M19 8v6M16 11h6"/>',
+  file: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
+  sparkle: '<path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   google: '',
 };
 export const icon = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || ""}</svg>`;
 export const GOOGLE = `<svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2A12 12 0 0 1 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3a12 12 0 0 1-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>`;
 
 /* ---- money ---- */
+export const ctx = { on: false, guests: [], cats: [] };
+export const GUEST_CATS = ["أكل وبقالة","كهرباء","مياه","غاز","منظفات"];
+export function guestExtra(e) {
+  const out = {}; if (!ctx.on || e.noGuests || !e.date || !ctx.cats.includes(e.category)) return out;
+  for (const g of ctx.guests) { const to = g.to || g.from; if (g.from && g.from <= e.date && e.date <= to) out[g.hostId] = (out[g.hostId] || 0) + (+g.factor || 1); }
+  return out;
+}
 export function shares(e, roster) {
   const out = {}; const sp = e.split || {}; const ids = (sp.members || []).filter(Boolean);
   if (sp.mode === "custom") { for (const [id, v] of Object.entries(sp.custom || {})) if (+v) out[id] = r2(v); return out; }
   if (!ids.length) return out;
-  if (sp.mode === "weight") {
-    const w = ids.map(id => +((roster.find(m => m.id === id) || {}).weight) || 1); const tw = w.reduce((a, b) => a + b, 0);
-    ids.forEach((id, i) => out[id] = e.amount * w[i] / tw);
-  } else ids.forEach(id => out[id] = e.amount / ids.length);
+  const gx = guestExtra(e);
+  const w = ids.map(id => (sp.mode === "weight" ? (+((roster.find(m => m.id === id) || {}).weight) || 1) : 1) + (gx[id] || 0));
+  const tw = w.reduce((a, b) => a + b, 0);
+  ids.forEach((id, i) => out[id] = e.amount * w[i] / tw);
   return out;
 }
 export const confirmed = p => p.status !== "pending";
@@ -148,4 +170,52 @@ export async function compressImage(file) {
     }
     return out.length < 950000 ? out : null;
   } finally { URL.revokeObjectURL(url); }
+}
+
+/* ---- personal loans: money from F to T means T owes F ---- */
+export function loanNets(loans) {
+  const pair = {};
+  for (const l of loans) { if (!confirmed(l)) continue; const [p, q] = l.from < l.to ? [l.from, l.to] : [l.to, l.from]; const k = p + "|" + q;
+    pair[k] = (pair[k] || 0) + (l.from === p ? 1 : -1) * (+l.amount || 0); }
+  return Object.entries(pair).filter(([, v]) => Math.abs(v) > 0.009).map(([k, v]) => { const [p, q] = k.split("|");
+    return v > 0 ? { debtor: q, creditor: p, amount: r2(v) } : { debtor: p, creditor: q, amount: r2(-v) }; });
+}
+export const slug = s => { let h = 0; for (const c of String(s)) h = (h * 31 + c.codePointAt(0)) >>> 0; return h.toString(36); };
+
+/* ---- quick add parser: "أحمد دفع 300 أكل على الكل" ---- */
+const AR_DIG = { "٠":"0","١":"1","٢":"2","٣":"3","٤":"4","٥":"5","٦":"6","٧":"7","٨":"8","٩":"9","٫":"." };
+export const norm = s => String(s || "").replace(/[٠-٩٫]/g, c => AR_DIG[c]).replace(/[أإآ]/g, "ا").replace(/ة/g, "ه").replace(/ى/g, "ي").replace(/[ًٌٍَُِّْـ]/g, "").toLowerCase().trim();
+const CAT_WORDS = {
+  "أكل وبقالة": ["اكل","بقاله","عشا","عشاء","غدا","غداء","فطار","خضار","فاكهه","لحمه","فراخ","عيش","سوبر","طلبات","اكلنا"],
+  "كهرباء": ["كهربا","كهرباء"], "مياه": ["ميه","مياه","مية"], "غاز": ["غاز","انبوبه"],
+  "إنترنت": ["نت","انترنت","راوتر","باقه","واي","wifi"], "إيجار": ["ايجار"],
+  "منظفات": ["منظفات","صابون","كلور","مسحوق","تنظيف"], "صيانة": ["صيانه","سباك","كهربائي","تصليح","نجار"],
+  "مواصلات": ["تاكسي","مواصلات","اوبر","بنزين","كريم"], "أثاث وأدوات": ["اثاث","ادوات","مكنسه","غساله"] };
+const STOP = new Set(["انا","اني","دفعت","دفع","دفعنا","جنيه","جنيها","ج","ريال","رس","في","ب","حق","تمن","ثمن","ل","عن","مصروف"]);
+export function parseQuick(text, roster, myId) {
+  const rawToks = String(text || "").trim().split(/\s+/).filter(Boolean);
+  const toks = rawToks.map(norm);
+  const people = roster.map(m => ({ id: m.id, active: m.active !== false, full: norm(m.name), first: norm(m.name).split(/\s+/)[0] })).filter(x => x.first);
+  const clean = t => { if (people.some(p => p.first === t)) return t; if (t.length > 2 && t[0] === "و" && people.some(p => p.first === t.slice(1))) return t.slice(1); return t; };
+  const who = t => { const c = clean(t); const hit = people.filter(p => p.first === c); return hit.length ? hit[0].id : null; };
+  let ai = toks.findIndex(t => t === "علي" || t === "عليه" || t === "علينا"); if (ai < 0) ai = toks.length;
+  const head = toks.slice(0, ai), seg = toks.slice(ai + 1);
+  const numTok = head.find(t => /^\d+([.,]\d+)?$/.test(t)) || (head.join(" ").match(/\d+(?:[.,]\d+)?/) || [])[0];
+  const amount = numTok ? r2(String(numTok).replace(",", ".")) : 0;
+  let paidBy = null; const di = head.findIndex(t => t.startsWith("دفع"));
+  if (head.includes("انا") || head.includes("اني") || head.includes("دفعت")) paidBy = myId;
+  for (const t of (di >= 0 ? head.slice(0, di) : head)) { const id = who(t); if (id) { paidBy = id; break; } }
+  let members = [], hint = "";
+  const all = people.filter(p => p.active).map(p => p.id);
+  if (seg.length) {
+    if (seg.some(t => /^(الكل|كلنا|كله|الجميع|كلهم)$/.test(t))) members = all;
+    else { seg.forEach(t => { const id = who(t); if (id) members.push(id); if ((t === "وانا" || t === "انا" || t === "ومعايا") && myId) members.push(myId); });
+      const cnt = seg.find(t => /^\d+$/.test(t)); if (!members.length && cnt) hint = `علّم على الـ${cnt} اللي هيتقسم عليهم`; }
+  }
+  if (!members.length) members = all;
+  members = [...new Set(members)];
+  let category = "أخرى";
+  outer: for (const [c, ws] of Object.entries(CAT_WORDS)) for (const t of head) { const b = t.replace(/^و?ال/, ""); if (ws.includes(t) || ws.includes(b)) { category = c; break outer; } }
+  const title = rawToks.slice(0, ai).filter((rt, i) => { const t = head[i]; return !STOP.has(t) && !/^\d+([.,]\d+)?$/.test(t) && !who(t); }).join(" ").trim();
+  return { amount, paidBy, members, category, title: title || (category === "أخرى" ? "مصروف" : category), hint };
 }

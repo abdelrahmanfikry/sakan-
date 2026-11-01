@@ -137,6 +137,35 @@ service cloud.firestore {
         allow read: if isMember(h);
         allow write: if isAdmin(h);
       }
+
+      match /guests/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) ||
+          (perm(h, 'memberGuests', true) && request.resource.data.hostId == myMember(h)));
+        allow update: if isAdmin(h) || (isWriter(h) && mine() && request.resource.data.hostId == resource.data.hostId);
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
+      match /loans/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) || (perm(h, 'memberLoans', true) && (
+          request.resource.data.to == myMember(h) ||
+          (request.resource.data.from == myMember(h) && (request.resource.data.status == 'pending' || !perm(h, 'payConfirm', true))))));
+        allow update: if isAdmin(h)
+          || (isWriter(h) && resource.data.to == myMember(h) && request.resource.data.status == 'confirmed' && onlyKeys(['status', 'confirmedAt', 'confirmedBy']));
+        allow delete: if isAdmin(h) || (isWriter(h) && resource.data.status == 'pending' && (mine() || resource.data.to == myMember(h)));
+      }
+
+      // سجل التعديلات: إضافة بس — محدش يعدّل أو يمسح
+      match /audit/{id} {
+        allow read: if isMember(h);
+        allow create: if isMember(h) && request.resource.data.uid == request.auth.uid;
+      }
+
+      match /closings/{id} {
+        allow read: if isMember(h);
+        allow write: if isAdmin(h);
+      }
     }
   }
 }
