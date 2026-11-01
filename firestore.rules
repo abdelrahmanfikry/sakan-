@@ -1,0 +1,142 @@
+rules_version = '2';
+// قواعد أمان «سكن» — انسخها كلها في Firebase Console ← Firestore Database ← Rules ← Publish
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function authed() { return request.auth != null; }
+    function hp(h) { return /databases/$(database)/documents/houses/$(h); }
+    function house(h) { return get(hp(h)).data; }
+    function up(h) { return /databases/$(database)/documents/houses/$(h)/users/$(request.auth.uid); }
+    function isMember(h) { return authed() && exists(up(h)); }
+    function myRole(h) { return get(up(h)).data.role; }
+    function isAdmin(h) { return isMember(h) && myRole(h) == 'admin'; }
+    function isWriter(h) { return isMember(h) && myRole(h) in ['admin', 'member']; }
+    function myMember(h) { return get(up(h)).data.get('memberId', ''); }
+    function perm(h, k, d) { return house(h).get('perms', {}).get(k, d); }
+    function locked(h, m) { return m in house(h).get('lockedMonths', []); }
+    function mine() { return resource.data.createdBy == request.auth.uid; }
+    function stamped() { return request.resource.data.createdBy == request.auth.uid; }
+    function onlyKeys(ks) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(ks); }
+
+    // قائمة البيوت اللي المستخدم فيها
+    match /memberships/{uid} {
+      allow read, write: if authed() && uid == request.auth.uid;
+    }
+
+    // أكواد الدعوة
+    match /codes/{code} {
+      allow read: if authed();
+      allow create: if authed() && (getAfter(hp(request.resource.data.hid)).data.ownerUid == request.auth.uid || isAdmin(request.resource.data.hid));
+      allow delete: if authed() && isAdmin(resource.data.hid);
+    }
+
+    match /houses/{h} {
+      allow read: if isMember(h);
+      allow create: if authed() && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isAdmin(h) && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if authed() && resource.data.ownerUid == request.auth.uid;
+
+      // حسابات الدخول وأدوارها
+      match /users/{uid} {
+        allow read: if isMember(h);
+        allow create: if authed() && uid == request.auth.uid && (
+          (request.resource.data.role == 'admin' && getAfter(hp(h)).data.ownerUid == request.auth.uid) ||
+          (request.resource.data.role == 'member' && house(h).get('perms', {}).get('autoJoin', true) == true
+             && request.resource.data.joinCode == house(h).joinCode));
+        allow update: if (isAdmin(h) && (uid != house(h).ownerUid || request.resource.data.role == 'admin'))
+                      || (uid == request.auth.uid && request.resource.data.role == resource.data.role);
+        allow delete: if uid != house(h).ownerUid && (isAdmin(h) || uid == request.auth.uid);
+      }
+
+      // السكان (الأسماء والأوزان والتأمين)
+      match /roster/{id} {
+        allow read: if isMember(h);
+        allow write: if isAdmin(h);
+      }
+
+      match /expenses/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) ||
+          ((request.resource.data.paidBy == myMember(h) || perm(h, 'expOthers', false)) && request.resource.data.paidBy != '__fund__'
+            && !locked(h, request.resource.data.month)));
+        allow update: if isAdmin(h) || (isWriter(h) && mine() && perm(h, 'editOwn', true)
+          && request.resource.data.createdBy == resource.data.createdBy
+          && !locked(h, resource.data.month) && !locked(h, request.resource.data.month)
+          && (request.resource.data.paidBy == myMember(h) || perm(h, 'expOthers', false)) && request.resource.data.paidBy != '__fund__');
+        allow delete: if isAdmin(h) || (isWriter(h) && mine() && perm(h, 'editOwn', true) && !locked(h, resource.data.month));
+      }
+
+      match /receipts/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped();
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
+      match /payments/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) || (!locked(h, request.resource.data.month) && (
+          request.resource.data.to == myMember(h) ||
+          (request.resource.data.from == myMember(h) && (request.resource.data.status == 'pending' || !perm(h, 'payConfirm', true))))));
+        allow update: if isAdmin(h)
+          || (isWriter(h) && resource.data.to == myMember(h) && request.resource.data.status == 'confirmed' && onlyKeys(['status', 'confirmedAt', 'confirmedBy']))
+          || (isWriter(h) && mine() && resource.data.status == 'pending' && request.resource.data.status == 'pending'
+              && request.resource.data.from == resource.data.from && !locked(h, request.resource.data.month));
+        allow delete: if isAdmin(h) || (isWriter(h) && resource.data.status == 'pending' && (mine() || resource.data.to == myMember(h)));
+      }
+
+      match /fund/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) ||
+          (perm(h, 'memberFund', true) && request.resource.data.memberId == myMember(h) && request.resource.data.status == 'pending'));
+        allow update: if isAdmin(h);
+        allow delete: if isAdmin(h) || (isWriter(h) && mine() && resource.data.status == 'pending');
+      }
+
+      match /shopping/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) || perm(h, 'memberShopping', true));
+        allow update: if isWriter(h);
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
+      match /notes/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && request.resource.data.pinned == false && (isAdmin(h) || perm(h, 'memberNotes', true));
+        allow update: if isAdmin(h) || (isWriter(h) && mine() && request.resource.data.pinned == resource.data.pinned);
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
+      match /polls/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) || perm(h, 'memberPolls', true));
+        allow update: if isAdmin(h) || (isWriter(h) && mine())
+          || (isWriter(h) && resource.data.closed == false && onlyKeys(['votes'])
+              && request.resource.data.votes.diff(resource.data.votes).affectedKeys().hasOnly([request.auth.uid]));
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
+      match /chores/{id} {
+        allow read: if isMember(h);
+        allow create, delete: if isAdmin(h);
+        allow update: if isAdmin(h) || (isWriter(h) && onlyKeys(['lastDone', 'log']));
+      }
+
+      match /meters/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) || perm(h, 'memberMeters', true));
+        allow update: if isAdmin(h) || (isWriter(h) && onlyKeys(['expenseId']));
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
+      match /items/{id} {
+        allow read: if isMember(h);
+        allow write: if isAdmin(h);
+      }
+
+      match /contacts/{id} {
+        allow read: if isMember(h);
+        allow write: if isAdmin(h);
+      }
+    }
+  }
+}
