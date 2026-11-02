@@ -65,6 +65,7 @@ const LISTS=["users","roster","expenses","payments","fund","shopping","chores","
 const S = { user:null, memberships:{}, hid:null, house:null, users:{}, roster:[], expenses:[], payments:[], fund:[], shopping:[], chores:[], notes:[], polls:[], meters:[], items:[], contacts:[],
   guests:[], loans:[], audit:[], closings:[], autoRec:new Set(), seenBefore:null,
   loaded:{}, unsubs:[], view:"home", f:{month:"",cat:"",mem:"",q:""}, showBought:false, dirty:false, booting:true };
+const cats = () => (S.house?.categories?.length ? S.house.categories : C.CATS);
 const F = k => ({...C.DEFAULT_FEATURES, ...(S.house?.features||{})})[k] !== false;
 const PM = k => { const p={...C.DEFAULT_PERMS, ...(S.house?.perms||{})}; return p[k]; };
 const me = () => S.users[S.user?.uid] || {};
@@ -322,7 +323,7 @@ function expenses(head){
   const list=filtered(), tot=list.reduce((a,e)=>a+(+e.amount||0),0);
   return head("المصاريف",`${list.length} بند · ${money(tot)}`,`${canAddExp()?`<button class="btn primary" data-act="addExp">${icon("plus")} مصروف</button>`:""}<button class="btn" data-act="csv">${icon("download")} CSV</button>`)+linkBanner()+
   `<section class="card"><div class="filters"><select id="fMonth">${monthOptions(S.f.month)}</select>
-   <select id="fCat"><option value="">كل الفئات</option>${C.CATS.map(c=>`<option ${c===S.f.cat?"selected":""}>${c}</option>`).join("")}</select>
+   <select id="fCat"><option value="">كل الفئات</option>${cats().map(c=>`<option ${c===S.f.cat?"selected":""}>${c}</option>`).join("")}</select>
    <select id="fMem"><option value="">كل الأعضاء</option>${S.roster.map(m=>`<option value="${m.id}" ${m.id===S.f.mem?"selected":""}>${esc(m.name)}</option>`).join("")}</select>
    <input id="fQ" type="search" placeholder="بحث…" value="${esc(S.f.q)}"></div>${expRows(list,false)}</section>`;
 }
@@ -453,6 +454,7 @@ function stats(head){
   ${bud.length?`<section class="card"><div class="card-head"><h2 class="h">الميزانية — ${esc(monthName(bm))}</h2></div><div class="list">${bud.map(([c,v])=>{const s=spentC(c); return `<div class="hbar"><span>${esc(c)}</span><div class="bar"><i class="${s>v?"over":""}" style="width:${Math.min(100,s/v*100)}%"></i></div><span class="num ${s>v?"neg":""}">${money(s)} / ${money(v)}</span></div>`;}).join("")}</div></section>`:""}
   <div class="grid"><section class="card"><div class="card-head"><h2 class="h">حسب الفئة</h2></div>${cats.length?`<div class="list">${cats.map(([c,v])=>`<div class="hbar"><span>${esc(c)}</span><div class="bar"><i style="width:${v/mx*100}%"></i></div><span class="num">${money(v)} <span class="tiny">${Math.round(v/tot*100)}٪</span></span></div>`).join("")}</div>`:emptyBox("chart","مفيش بيانات")}</section>
   <section class="card"><div class="card-head"><h2 class="h">كل شهر</h2></div>${months.length?`<div class="list">${months.map(([k,v])=>`<div class="hbar"><span>${esc(monthName(k))}</span><div class="bar"><i style="width:${v/mm*100}%"></i></div><span class="num">${money(v)}</span></div>`).join("")}</div>`:emptyBox("chart","مفيش بيانات")}</section></div>
+  ${personSection()}
   ${PM("seeAll")||isAdmin()?`<section class="card"><div class="card-head"><h2 class="h">دفع مقابل نصيبه</h2></div><div class="tablebox"><table><thead><tr><th>العضو</th><th class="n">دفع</th><th class="n">نصيبه</th><th class="n">بعت</th><th class="n">استلم</th><th class="n">الصافي</th></tr></thead><tbody>${S.roster.map(x=>{const v=b[x.id]; return `<tr><td>${esc(x.name)}</td><td class="n">${money(v.paid)}</td><td class="n">${money(v.share)}</td><td class="n">${money(v.sent)}</td><td class="n">${money(v.recv)}</td><td class="n ${v.net>0.009?"pos":v.net<-0.009?"neg":""}">${money(v.net)}</td></tr>`;}).join("")}</tbody></table></div></section>`:""}`;
 }
 function activity(head){
@@ -482,16 +484,50 @@ function settings(head){
    <section class="card"><div class="card-head"><h2 class="h">صلاحيات الأعضاء</h2><span class="tiny">المدير دايمًا يقدر يعمل كل حاجة</span></div><div class="toggle-list">${C.PERMS.map(([k,,t,s])=>sw("data-perm",k,!!p[k],t,s)).join("")}</div>
     <p class="tiny" style="margin:12px 0 0">الأدوار: <b>مدير</b> يتحكم في كل حاجة · <b>عضو</b> حسب الصلاحيات دي · <b>مشاهد</b> يتفرّج بس. تغيّر دور أي حد من «الأعضاء».</p></section>
   </div>
-  ${f.guests!==false?`<section class="card"><div class="card-head"><h2 class="h">الضيوف</h2></div><p class="sub" style="margin:0 0 12px">الفئات اللي الضيف بيزوّد فيها حصة المستضيف:</p><div class="checks">${C.CATS.map(c=>`<label><input type="checkbox" data-gcat="${c}" ${(h.guestCats||C.GUEST_CATS).includes(c)?"checked":""}> ${c}</label>`).join("")}</div><div class="actions" style="margin-top:12px"><button class="btn primary" data-act="saveGuestCats">حفظ</button></div></section>`:""}
+  <section class="card"><div class="card-head"><h2 class="h">أنواع المصاريف</h2></div><div class="list">${cats().map((c,i)=>{ const n=S.expenses.filter(e=>e.category===c).length; return `<div class="row-item"><div class="grow"><b>${esc(c)}</b><div class="tiny">${n} مصروف</div></div>${n?'<span class="chip">مستخدم</span>':`<button class="btn sm icon danger" data-act="delCat" data-i="${i}">${icon("trash")}</button>`}</div>`; }).join("")}</div>
+   <div class="actions" style="margin-top:12px"><input id="newCat" placeholder="نوع جديد" maxlength="30" style="flex:1 1 200px"><button class="btn primary" data-act="addCat">${icon("plus")} إضافة</button></div></section>
+  <section class="card"><div class="card-head"><h2 class="h">استيراد بيانات</h2></div><p class="sub" style="margin:0 0 12px">ارفع ملف نسخة احتياطية (JSON) فيه السكان والمصاريف والتحويلات، وهتتضاف للسكن ده.</p><label class="f">ملف JSON<input type="file" id="impFile" accept=".json,application/json"></label></section>
+  ${f.guests!==false?`<section class="card"><div class="card-head"><h2 class="h">الضيوف</h2></div><p class="sub" style="margin:0 0 12px">الفئات اللي الضيف بيزوّد فيها حصة المستضيف:</p><div class="checks">${cats().map(c=>`<label><input type="checkbox" data-gcat="${c}" ${(h.guestCats||C.GUEST_CATS).includes(c)?"checked":""}> ${c}</label>`).join("")}</div><div class="actions" style="margin-top:12px"><button class="btn primary" data-act="saveGuestCats">حفظ</button></div></section>`:""}
   <section class="card"><div class="card-head"><h2 class="h">كود الدعوة</h2></div><div class="actions"><button class="btn" data-act="invite">${icon("key")} عرض الكود واللينك</button><button class="btn" data-act="newCode">كود جديد (يلغي القديم)</button></div></section>
   ${f.recurring!==false?`<section class="card"><div class="card-head"><h2 class="h">الفواتير الثابتة</h2><div class="actions"><button class="btn sm" data-act="addRec">${icon("plus")} بند</button><button class="btn sm primary" data-act="applyRec" ${(h.recurring||[]).length?"":"disabled"}>أضفها لـ ${esc(monthName(thisM))}</button></div></div>
    ${(h.recurring||[]).length?`<div class="list">${h.recurring.map((r,i)=>`<div class="row-item"><div class="grow"><b>${esc(r.title)}</b><div class="tiny">${esc(r.category)} · يدفعه ${esc(mName(r.paidBy))} · ${r.mode==="weight"?"بالأوزان":"بالتساوي"} · يوم ${+r.dueDay||1}</div></div><span class="amt">${money(r.amount)}</span><button class="btn sm icon danger" data-act="delRec" data-i="${i}">${icon("trash")}</button></div>`).join("")}</div>`:`<p class="sub" style="margin:0">زي الإيجار والإنترنت.</p>`}</section>`:""}
-  ${f.budgets!==false?`<section class="card"><div class="card-head"><h2 class="h">الميزانية الشهرية</h2></div><div class="form">${C.CATS.map(c=>`<label class="f">${c}<input type="number" min="0" data-budget="${c}" value="${(h.budgets||{})[c]||""}"></label>`).join("")}<div class="full"><button class="btn primary" data-act="saveBudgets">حفظ</button></div></div></section>`:""}
+  ${f.budgets!==false?`<section class="card"><div class="card-head"><h2 class="h">الميزانية الشهرية</h2></div><div class="form">${cats().map(c=>`<label class="f">${c}<input type="number" min="0" data-budget="${c}" value="${(h.budgets||{})[c]||""}"></label>`).join("")}<div class="full"><button class="btn primary" data-act="saveBudgets">حفظ</button></div></div></section>`:""}
   ${f.meters!==false?`<section class="card"><div class="card-head"><h2 class="h">أسعار العدادات</h2></div><div class="form">${["كهرباء","مياه","غاز"].map(t=>`<label class="f">${t} — سعر الوحدة<input type="number" min="0" step="0.01" data-mp="${t}" data-k="unit" value="${(mp[t]||{}).unit||""}"></label><label class="f">${t} — رسوم ثابتة<input type="number" min="0" step="0.01" data-mp="${t}" data-k="fixed" value="${(mp[t]||{}).fixed||""}"></label>`).join("")}<div class="full"><button class="btn primary" data-act="saveMeters">حفظ</button></div></div></section>`:""}
   ${f.fund?`<section class="card"><div class="card-head"><h2 class="h">الصندوق</h2></div><div class="form"><label class="f">الاشتراك الشهري للفرد<input id="fMonthly" type="number" min="0" value="${fc.monthly||""}"></label><div class="full"><button class="btn primary" data-act="saveFund">حفظ</button></div></div></section>`:""}
   <section class="card"><div class="card-head"><h2 class="h">قفل الشهور</h2></div><p class="sub" style="margin:0 0 12px">الشهر المقفول محدش يعدّل فيه غير المدير.</p><div class="checks">${ms.map(m=>`<label><input type="checkbox" data-lock="${m}" ${(h.lockedMonths||[]).includes(m)?"checked":""}> ${esc(monthName(m))}</label>`).join("")}</div></section>
   <section class="card"><div class="card-head"><h2 class="h">البيانات</h2></div><div class="actions"><button class="btn" data-act="backup">${icon("download")} نسخة احتياطية JSON</button><button class="btn" data-act="csv">${icon("download")} المصاريف CSV</button></div></section>
   <section class="card"><div class="card-head"><h2 class="h neg">منطقة الخطر</h2></div><div class="actions">${isOwner()?`<button class="btn danger" data-act="deleteHouse">${icon("trash")} حذف السكن نهائيًا</button>`:`<button class="btn danger" data-act="leave">${icon("door")} خروج من السكن</button>`}</div></section>`;
+}
+
+/* ---------------- categories, person view, import ---------------- */
+function mapCat(c){ const L=cats(); if(L.includes(c)) return c; const alias={"أكل وبقالة":["غداء","أكل","سوبرماركت"],"إيجار":["الإيجار"],"كهرباء":["فواتير"],"مياه":["فواتير"],"غاز":["فواتير"],"إنترنت":["فواتير"],"مواصلات":["مواصلات","أوبر"],"صيانة":["خدمات العمارة"]}; for(const a of alias[c]||[]) if(L.includes(a)) return a; return L.includes("أخرى")?"أخرى":L[L.length-1]; }
+function personSection(){
+  const mine=myMember(); const can=PM("seeAll")||isAdmin(); const pid=S.f.person&&(can||S.f.person===mine)?S.f.person:(mine||(can?active()[0]?.id:null)); if(!pid) return "";
+  const months={}, byCat={};
+  S.expenses.forEach(e=>{ const sh=C.shares(e,S.roster)[pid]||0, pd=e.paidBy===pid?+e.amount:0; if(!sh&&!pd) return; const m=monthOf(e.date); months[m]=months[m]||{share:0,paid:0}; months[m].share+=sh; months[m].paid+=pd; if(sh) byCat[e.category||"أخرى"]=(byCat[e.category||"أخرى"]||0)+sh; });
+  const ms=Object.entries(months).sort((a,b)=>b[0].localeCompare(a[0])); const cs=Object.entries(byCat).sort((a,b)=>b[1]-a[1]); const mx=Math.max(1,...cs.map(c=>c[1]));
+  const tot=ms.reduce((a,[,v])=>a+v.share,0), paid=ms.reduce((a,[,v])=>a+v.paid,0);
+  return `<section class="card"><div class="card-head"><h2 class="h">حساب كل شخص</h2>${can?`<select id="fPerson" style="width:auto">${S.roster.map(m=>`<option value="${m.id}" ${m.id===pid?"selected":""}>${esc(m.name)}${m.id===mine?" (انت)":""}</option>`).join("")}</select>`:""}</div>
+   <div class="grid3" style="margin-bottom:14px"><div class="stat"><div class="l">نصيبه من كل المصاريف</div><div class="v">${money(tot)}</div></div><div class="stat"><div class="l">اللي دفعه بإيده</div><div class="v">${money(paid)}</div></div></div>
+   <div class="grid"><div><div class="tiny" style="margin-bottom:8px">كل شهر</div><div class="list">${ms.map(([m,v])=>`<div class="row-item"><div class="grow"><b>${esc(monthName(m))}</b><div class="tiny">دفع ${money(v.paid)}</div></div><span class="amt">${money(v.share)}</span></div>`).join("")||emptyBox("chart","مفيش حركات")}</div></div>
+   <div><div class="tiny" style="margin-bottom:8px">نصيبه حسب النوع</div><div class="list">${cs.map(([c,v])=>`<div class="hbar"><span>${esc(c)}</span><div class="bar"><i style="width:${v/mx*100}%"></i></div><span class="num">${money(v)}</span></div>`).join("")}</div></div></div></section>`;
+}
+async function importFile(file){
+  if(!file) return; if(!isAdmin()) return toast("الاستيراد للمدير بس");
+  let d; try{ d=JSON.parse(await file.text()); }catch(_){ return toast("الملف ده مش JSON سليم"); }
+  const roster=d.roster||[], ex=d.expenses||[], pays=d.payments||[];
+  if(!roster.length) return toast("الملف مفيهوش سكان");
+  const tot=ex.reduce((a,e)=>a+(+e.amount||0),0);
+  confirmBox(`استيراد ${roster.length} ساكن و${ex.length} مصروف و${pays.length} تحويل؟`,"استورد",()=>run(async()=>{
+    const now=iso(), uid=S.user.uid; const ops=[];
+    roster.forEach((m,i)=>ops.push([H("roster",m.id),{name:m.name,order:S.roster.length+i,weight:+m.weight||1,active:m.active!==false,room:m.room||"",deposit:+m.deposit||0,instapay:safeUrl(m.instapay)||"",ipa:m.ipa||"",wallet:m.wallet||"",phone:m.phone||"",createdAt:now}]));
+    ex.forEach(e=>ops.push([H("expenses",e.id),{title:e.title,amount:r2(e.amount),date:e.date,month:monthOf(e.date),category:e.category||"أخرى",paidBy:e.paidBy,split:e.split,note:e.note||"",receiptId:null,recurring:false,createdBy:uid,createdAt:e.createdAt||now,imported:true}]));
+    pays.forEach(p=>ops.push([H("payments",p.id),{from:p.from,to:p.to,amount:r2(p.amount),date:p.date,month:monthOf(p.date),method:p.method||"",note:p.note||"",status:"confirmed",confirmedAt:now,confirmedBy:uid,createdBy:uid,createdAt:p.createdAt||now,imported:true}]));
+    for(let i=0;i<ops.length;i+=400){ const bt=writeBatch(db); ops.slice(i,i+400).forEach(([r,v])=>bt.set(r,v)); await bt.commit(); }
+    const patch={}; if(Array.isArray(d.categories)&&d.categories.length) patch.categories=[...new Set([...(S.house.categories||[]),...d.categories])]; if(d.houseName&&!S.house.name) patch.name=d.houseName; if(Object.keys(patch).length) await updateDoc(doc(db,"houses",S.hid),patch);
+    if(d.me&&!myMember()) await updateDoc(H("users",uid),{memberId:d.me});
+    await fbAdd(collection(db,"houses",S.hid,"audit"),{at:iso(),uid,action:"create",col:"import",refId:"import",before:null,after:{title:`استيراد ${roster.length} ساكن و${ex.length} مصروف (${money(tot)}) و${pays.length} تحويل`}});
+  },"اتستوردت البيانات"),"البيانات هتتضاف على اللي موجود في السكن.");
 }
 
 /* ---------------- new features ---------------- */
@@ -592,7 +628,7 @@ function printReport(m){
   setTimeout(()=>window.print(),150);
 }
 window.addEventListener("afterprint",()=>{ const pr=document.getElementById("printRoot"); if(pr) pr.innerHTML=""; });
-const COL_AR={expenses:"مصروف",payments:"دفعة",fund:"اشتراك صندوق",roster:"ساكن",users:"حساب",house:"إعدادات السكن",shopping:"مشتريات",chores:"مهمة",notes:"إعلان",polls:"تصويت",meters:"قراية عداد",items:"عهدة",contacts:"رقم",guests:"ضيف",loans:"سلفة",closings:"قفل شهر"};
+const COL_AR={import:"بيانات",expenses:"مصروف",payments:"دفعة",fund:"اشتراك صندوق",roster:"ساكن",users:"حساب",house:"إعدادات السكن",shopping:"مشتريات",chores:"مهمة",notes:"إعلان",polls:"تصويت",meters:"قراية عداد",items:"عهدة",contacts:"رقم",guests:"ضيف",loans:"سلفة",closings:"قفل شهر"};
 const ACT_AR={create:"أضاف",update:"عدّل",delete:"حذف"};
 const FIELD_AR={title:"البند",amount:"المبلغ",date:"التاريخ",category:"الفئة",paidBy:"دفعه",split:"التقسيم",note:"ملاحظة",from:"من",to:"إلى",status:"الحالة",method:"الطريقة",name:"الاسم",weight:"الوزن",active:"ساكن",role:"الدور",memberId:"مربوط بـ",deposit:"التأمين",item:"الحاجة",qty:"الكمية",bought:"اتشرى",text:"النص",pinned:"مثبّت",reading:"القراية",type:"النوع",hostId:"المستضيف",factor:"الحصة",lockedMonths:"الشهور المقفولة",noGuests:"من غير ضيوف",room:"الأوضة",lastDone:"آخر مرة",closed:"مقفول"};
 function fmtVal(k,v){ if(v==null||v==="") return "—"; if(["paidBy","from","to","memberId","hostId","addedBy","boughtBy"].includes(k)) return mName(v); if(k==="amount"||k==="deposit") return money(v);
@@ -607,7 +643,7 @@ function auditView(head){
   const line=a=>{ let rows=[];
     if(a.action==="update") rows=Object.keys(a.after||{}).filter(k=>!skip.has(k.split(".")[0])).map(k=>{ const bv=gp(a.before||{},k), v=a.after[k]; if(JSON.stringify(bv)===JSON.stringify(v)) return ""; const label=k.startsWith("features.")?"ميزة «"+((C.FEATURES.find(x=>x[0]===k.slice(9))||[])[1]||k)+"»":k.startsWith("perms.")?"صلاحية «"+((C.PERMS.find(x=>x[0]===k.slice(6))||[])[2]||k)+"»":(FIELD_AR[k]||k); return `<div class="tiny">${esc(label)}: <s>${esc(fmtVal(k,bv))}</s> ← <b style="display:inline">${esc(fmtVal(k,v))}</b></div>`; }).filter(Boolean);
     else { const o=(a.action==="delete"?a.before:a.after)||{}; rows=["amount","date","paidBy","from","to","hostId"].filter(k=>o[k]!=null&&o[k]!=="").map(k=>`<div class="tiny">${esc(FIELD_AR[k]||k)}: ${esc(fmtVal(k,o[k]))}</div>`); }
-    return `<div class="row-item" style="align-items:flex-start"><div class="ic-round ${a.action==="delete"?"neg":a.action==="create"?"pos":"acc"}">${icon(a.action==="delete"?"trash":a.action==="create"?"plus":"edit")}</div><div class="grow"><b>${esc(who(a.uid))} ${ACT_AR[a.action]||a.action} ${esc(COL_AR[a.col]||a.col)} ${esc(ttl(a))}</b>${rows.join("")}<div class="tiny">${esc(fmtDT(a.at))}</div></div></div>`; };
+    return `<div class="row-item" style="align-items:flex-start"><div class="ic-round ${a.action==="delete"?"neg":a.action==="create"?"pos":"acc"}">${icon(a.action==="delete"?"trash":a.action==="create"?"plus":"edit")}</div><div class="grow"><b>${esc(who(a.uid))} ${ACT_AR[a.action]||a.action} ${esc(COL_AR[a.col]||a.col)} ${esc(ttl(a))}</b>${rows.join("")}<div class="tiny">${esc(fmtDT(a.at))}</div></div>${a.action==="delete"&&a.before&&isAdmin()&&!["house","users"].includes(a.col)&&!(S[a.col]||[]).some?.(x=>x.id===a.refId)?`<button class="btn sm" data-act="restore" data-id="${a.id}">رجّعه</button>`:""}</div>`; };
   return head("سجل التعديلات","كل إضافة وتعديل وحذف — ومحدش يقدر يمسحه",`<select id="fAudit" style="width:auto"><option value="">الكل</option><option value="create" ${f==="create"?"selected":""}>إضافة</option><option value="update" ${f==="update"?"selected":""}>تعديل</option><option value="delete" ${f==="delete"?"selected":""}>حذف</option></select>`)+
    `<section class="card">${list.length?`<div class="list">${list.slice(0,200).map(line).join("")}</div>`:emptyBox("history","مفيش تعديلات متسجّلة لسه","من دلوقتي أي إضافة أو تعديل أو حذف هيتسجّل هنا.")}</section>`;
 }
@@ -624,7 +660,7 @@ function expModal(e,preset){
    <label class="f full">البند<input id="eTitle" value="${esc(e.title||"")}" placeholder="مثلًا: فاتورة كهرباء" maxlength="80"></label>
    <label class="f">المبلغ (${esc(cur())})<input id="eAmt" type="number" inputmode="decimal" min="0" step="0.01" value="${e.amount??""}"></label>
    <label class="f">التاريخ<input id="eDate" type="date" value="${esc(e.date)}"></label>
-   <label class="f">الفئة<select id="eCat">${C.CATS.map(c=>`<option ${c===e.category?"selected":""}>${c}</option>`).join("")}</select></label>
+   <label class="f">الفئة<select id="eCat">${cats().map(c=>`<option ${c===e.category?"selected":""}>${c}</option>`).join("")}</select></label>
    <label class="f">مين دفع<select id="ePaid">${payerOpts}</select></label>
    <div class="full"><div class="seg" id="eMode">${[["equal","بالتساوي"],["weight","بالأوزان"],["custom","مبالغ مخصّصة"]].map(([k,l])=>`<button type="button" data-mode="${k}" aria-pressed="${(sp.mode||"equal")===k}">${l}</button>`).join("")}</div></div>
    <div class="full"><div class="actions" style="margin-bottom:8px"><button class="btn sm" type="button" id="eAll">الكل</button><button class="btn sm" type="button" id="eNone">ولا حد</button></div><div class="checks" id="eMembers"></div><div class="tiny" id="eHint" style="margin-top:6px"></div></div>
@@ -803,6 +839,8 @@ function bindView(){
   on("shItem","keydown",e=>{ if(e.key==="Enter") handle("addShop"); });
   on("qaText","keydown",e=>{ if(e.key==="Enter") handle("quickParse"); });
   on("fAudit","change",e=>{ S.f.audit=e.target.value; render(); });
+  on("impFile","change",e=>importFile(e.target.files[0]));
+  on("fPerson","change",e=>{ S.f.person=e.target.value; render(); });
   const c=document.getElementById("content");
   c.querySelectorAll("[data-feat]").forEach(i=>i.onchange=()=>upHouse({["features."+i.dataset.feat]:i.checked},i.checked?"اتشغّلت":"اتقفلت"));
   c.querySelectorAll("[data-perm]").forEach(i=>i.onchange=()=>upHouse({["perms."+i.dataset.perm]:i.checked},"اتحفظت الصلاحية"));
@@ -822,6 +860,10 @@ function handle(a,b={dataset:{}}){
   const id=b.dataset?.id; const E=S.expenses.find(x=>x.id===id), P=S.payments.find(x=>x.id===id), M=S.roster.find(x=>x.id===id);
   switch(a){
     case "theme": return toggleTheme();
+    case "addCat": { const v=document.getElementById("newCat")?.value.trim(); if(!v) return toast("اكتب اسم النوع"); if(cats().includes(v)) return toast("النوع موجود"); return upHouse({categories:[...cats(),v]},"اتضاف النوع"); }
+    case "delCat": { const c=[...cats()]; c.splice(+b.dataset.i,1); return upHouse({categories:c},"اتشال النوع"); }
+    case "restore": { const a=S.audit.find(x=>x.id===id); if(!a||!a.before) return; return confirmBox("ترجّع البند ده؟","رجّعه",()=>run(()=>setDoc(H(a.col,a.refId),a.before),"اترجّع"),"هيرجع زي ما كان قبل الحذف."); }
+    case "personView": S.f.person=b.dataset.id; return render();
     case "newHouse": return renderNoHouse();
     case "logout": return signOut(auth);
     case "quick": return quickSheet();
@@ -851,7 +893,7 @@ function handle(a,b={dataset:{}}){
     case "saveBudgets": { const o={}; document.querySelectorAll("[data-budget]").forEach(i=>{ if(+i.value>0) o[i.dataset.budget]=+i.value; }); return upHouse({budgets:o},"اتحفظت الميزانية"); }
     case "saveMeters": { const o={}; document.querySelectorAll("[data-mp]").forEach(i=>{ o[i.dataset.mp]=o[i.dataset.mp]||{}; o[i.dataset.mp][i.dataset.k]=+i.value||0; }); return upHouse({meterPrices:o},"اتحفظت الأسعار"); }
     case "saveFund": return upHouse({fundCfg:{monthly:+document.getElementById("fMonthly").value||0}},"اتحفظ");
-    case "addRec": return simpleModal("بند شهري ثابت",[{id:"title",label:"البند",full:true,ph:"إيجار الشقة"},{id:"amount",label:"المبلغ",type:"number"},{id:"category",label:"الفئة",type:"select",options:C.CATS.map(c=>[c,c]),value:"إيجار"},
+    case "addRec": return simpleModal("بند شهري ثابت",[{id:"title",label:"البند",full:true,ph:"إيجار الشقة"},{id:"amount",label:"المبلغ",type:"number"},{id:"category",label:"الفئة",type:"select",options:cats().map(c=>[c,c]),value:"إيجار"},
       {id:"paidBy",label:"مين بيدفعه",type:"select",options:[...active().map(m=>[m.id,m.name]),...(F("fund")?[[FUND,"الصندوق"]]:[])]},{id:"mode",label:"التقسيم",type:"select",options:[["equal","بالتساوي"],["weight","بالأوزان"]]},{id:"dueDay",label:"يوم الاستحقاق",type:"number",value:1,attrs:'min="1" max="28"'}],
       async v=>{ if(!v.title||!(+v.amount>0)) { toast("كمّل البيانات"); return false; } await updateDoc(doc(db,"houses",S.hid),{recurring:[...(S.house.recurring||[]),{...v,amount:r2(v.amount),dueDay:Math.min(28,Math.max(1,+v.dueDay||1))}]}); toast("اتضاف"); });
     case "delRec": { const r=[...(S.house.recurring||[])]; r.splice(+b.dataset.i,1); return upHouse({recurring:r}); }
@@ -893,7 +935,7 @@ function handle(a,b={dataset:{}}){
     case "addContact": return simpleModal("رقم مهم",[{id:"name",label:"الاسم",full:true},{id:"role",label:"الصفة",ph:"صاحب الشقة"},{id:"phone",label:"الرقم",dir:"ltr"}],async v=>{ if(!v.name||!v.phone){ toast("الاسم والرقم مطلوبين"); return false; } await addDoc(HC("contacts"),{...v,createdAt:iso()}); toast("اتضاف"); });
     case "delContact": return run(()=>deleteDoc(H("contacts",id)),"اتحذف");
     case "editRules": return simpleModal("قوانين السكن",[{id:"t",label:"",type:"textarea",full:true,rows:10,value:S.house.rulesText||"",max:5000}],async v=>{ await updateDoc(doc(db,"houses",S.hid),{rulesText:v.t}); toast("اتحفظت"); });
-    case "quickParse": { const t=document.getElementById("qaText")?.value.trim(); if(!t) return toast("اكتب الجملة الأول"); const r=C.parseQuick(t,S.roster,myMember()); if(!r.amount) return toast("ما لقيتش المبلغ — اكتب رقم في الجملة");
+    case "quickParse": { const t=document.getElementById("qaText")?.value.trim(); if(!t) return toast("اكتب الجملة الأول"); const r=C.parseQuick(t,S.roster,myMember()); r.category=mapCat(r.category); if(!r.amount) return toast("ما لقيتش المبلغ — اكتب رقم في الجملة");
       if(r.hint) setTimeout(()=>toast(r.hint),500); return expModal(null,{title:r.title,amount:r.amount,category:r.category,paidBy:r.paidBy||myMember()||active()[0]?.id,split:{mode:"equal",members:r.members}}); }
     case "addGuest": case "editGuest": { const g=S.guests.find(x=>x.id===id)||{}; const hosts=isAdmin()?active():active().filter(x=>x.id===myMember()); if(!hosts.length) return toast("اختار اسمك الأول من «الأعضاء»");
       return simpleModal(g.id?"تعديل ضيف":"ضيف جديد",[{id:"hostId",label:"ضيف مين",type:"select",options:hosts.map(m=>[m.id,m.name]),value:g.hostId||myMember()},{id:"name",label:"اسم الضيف",value:g.name},{id:"from",label:"من يوم",type:"date",value:g.from||today()},{id:"to",label:"لحد يوم",type:"date",value:g.to||today()},{id:"factor",label:"حصته (1 = زي ساكن)",type:"number",value:g.factor||1,attrs:'min="0.1" step="0.1"'},{id:"note",label:"ملاحظة",value:g.note}],
