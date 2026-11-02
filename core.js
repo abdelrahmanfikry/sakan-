@@ -190,14 +190,16 @@ const CAT_WORDS = {
   "كهرباء": ["كهربا","كهرباء"], "مياه": ["ميه","مياه","مية"], "غاز": ["غاز","انبوبه"],
   "إنترنت": ["نت","انترنت","راوتر","باقه","واي","wifi"], "إيجار": ["ايجار"],
   "منظفات": ["منظفات","صابون","كلور","مسحوق","تنظيف"], "صيانة": ["صيانه","سباك","كهربائي","تصليح","نجار"],
-  "مواصلات": ["تاكسي","مواصلات","اوبر","بنزين","كريم"], "أثاث وأدوات": ["اثاث","ادوات","مكنسه","غساله"] };
+  "مواصلات": ["تاكسي","مواصلات","اوبر","بنزين","كريم","مترو","توكتوك","ميكروباص","اتوبيس"], "أثاث وأدوات": ["اثاث","ادوات","مكنسه","غساله"] };
 const STOP = new Set(["انا","اني","دفعت","دفع","دفعنا","جنيه","جنيها","ج","ريال","رس","في","ب","حق","تمن","ثمن","ل","عن","مصروف"]);
 export function parseQuick(text, roster, myId) {
   const rawToks = String(text || "").trim().split(/\s+/).filter(Boolean);
   const toks = rawToks.map(norm);
-  const people = roster.map(m => ({ id: m.id, active: m.active !== false, full: norm(m.name), first: norm(m.name).split(/\s+/)[0] })).filter(x => x.first);
-  const clean = t => { if (people.some(p => p.first === t)) return t; if (t.length > 2 && t[0] === "و" && people.some(p => p.first === t.slice(1))) return t.slice(1); return t; };
-  const who = t => { const c = clean(t); const hit = people.filter(p => p.first === c); return hit.length ? hit[0].id : null; };
+  const people = roster.map(m => ({ id: m.id, active: m.active !== false, toks: norm(m.name).split(/\s+/).filter(Boolean) })).filter(x => x.toks.length);
+  const tokIds = {}; people.forEach(p => p.toks.forEach(t => { (tokIds[t] = tokIds[t] || new Set()).add(p.id); }));
+  const isName = t => !!tokIds[t];
+  const clean = t => { if (isName(t)) return t; if (t.length > 2 && t[0] === "و" && isName(t.slice(1))) return t.slice(1); return t; };
+  const who = t => { const ids = tokIds[clean(t)]; return ids && ids.size === 1 ? [...ids][0] : null; };
   let ai = toks.findIndex(t => t === "علي" || t === "عليه" || t === "علينا"); if (ai < 0) ai = toks.length;
   const head = toks.slice(0, ai), seg = toks.slice(ai + 1);
   const numTok = head.find(t => /^\d+([.,]\d+)?$/.test(t)) || (head.join(" ").match(/\d+(?:[.,]\d+)?/) || [])[0];
@@ -216,6 +218,6 @@ export function parseQuick(text, roster, myId) {
   members = [...new Set(members)];
   let category = "أخرى";
   outer: for (const [c, ws] of Object.entries(CAT_WORDS)) for (const t of head) { const b = t.replace(/^و?ال/, ""); if (ws.includes(t) || ws.includes(b)) { category = c; break outer; } }
-  const title = rawToks.slice(0, ai).filter((rt, i) => { const t = head[i]; return !STOP.has(t) && !/^\d+([.,]\d+)?$/.test(t) && !who(t); }).join(" ").trim();
+  const title = rawToks.slice(0, ai).filter((rt, i) => { const t = head[i]; return !STOP.has(t) && !/^\d+([.,]\d+)?$/.test(t) && !tokIds[clean(t)]; }).join(" ").trim();
   return { amount, paidBy, members, category, title: title || (category === "أخرى" ? "مصروف" : category), hint };
 }
