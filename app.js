@@ -65,6 +65,7 @@ const LISTS=["users","roster","expenses","payments","fund","shopping","chores","
 const S = { user:null, memberships:{}, hid:null, house:null, users:{}, roster:[], expenses:[], payments:[], fund:[], shopping:[], chores:[], notes:[], polls:[], meters:[], items:[], contacts:[],
   guests:[], loans:[], audit:[], closings:[], autoRec:new Set(), seenBefore:null,
   loaded:{}, unsubs:[], view:"home", f:{month:"",cat:"",mem:"",q:""}, showBought:false, dirty:false, booting:true };
+const guestCats = () => S.house?.guestCats || [...new Set(C.GUEST_CATS.map(mapCat).concat(cats().filter(c=>["سوبرماركت","بقالة"].includes(c))))].filter(c=>c!=="أخرى");
 const cats = () => (S.house?.categories?.length ? S.house.categories : C.CATS);
 const F = k => ({...C.DEFAULT_FEATURES, ...(S.house?.features||{})})[k] !== false;
 const PM = k => { const p={...C.DEFAULT_PERMS, ...(S.house?.perms||{})}; return p[k]; };
@@ -199,7 +200,7 @@ function render(){
   if(ae && ae.closest && ae.closest("#content") && /INPUT|TEXTAREA/.test(ae.tagName) && ae.value){ S.dirty=true; return; }
   if(document.querySelector("#modalRoot .overlay")) { S.dirty=true; }
   const ready=["house","users","roster","expenses","payments"].every(k=>S.loaded[k]);
-  C.ctx.on=F("guests"); C.ctx.guests=S.guests; C.ctx.cats=S.house?.guestCats||C.GUEST_CATS;
+  C.ctx.on=F("guests"); C.ctx.guests=S.guests; C.ctx.cats=guestCats();
   const items=navItems(); if(!items.find(i=>i[0]===S.view)) S.view="home";
   const h=S.house||{}; const m=me();
   const navBtn=([v,l,ic])=>{ const b=badgeFor(v); return `<button class="nav-btn" data-go="${v}" ${S.view===v?'aria-current="page"':""}>${icon(ic)}<span>${l}</span>${b?`<span class="nav-badge">${b}</span>`:""}</button>`; };
@@ -487,7 +488,7 @@ function settings(head){
   <section class="card"><div class="card-head"><h2 class="h">أنواع المصاريف</h2></div><div class="list">${cats().map((c,i)=>{ const n=S.expenses.filter(e=>e.category===c).length; return `<div class="row-item"><div class="grow"><b>${esc(c)}</b><div class="tiny">${n} مصروف</div></div>${n?'<span class="chip">مستخدم</span>':`<button class="btn sm icon danger" data-act="delCat" data-i="${i}">${icon("trash")}</button>`}</div>`; }).join("")}</div>
    <div class="actions" style="margin-top:12px"><input id="newCat" placeholder="نوع جديد" maxlength="30" style="flex:1 1 200px"><button class="btn primary" data-act="addCat">${icon("plus")} إضافة</button></div></section>
   <section class="card"><div class="card-head"><h2 class="h">استيراد بيانات</h2></div><p class="sub" style="margin:0 0 12px">ارفع ملف نسخة احتياطية (JSON) فيه السكان والمصاريف والتحويلات، وهتتضاف للسكن ده.</p><label class="f">ملف JSON<input type="file" id="impFile" accept=".json,application/json"></label></section>
-  ${f.guests!==false?`<section class="card"><div class="card-head"><h2 class="h">الضيوف</h2></div><p class="sub" style="margin:0 0 12px">الفئات اللي الضيف بيزوّد فيها حصة المستضيف:</p><div class="checks">${cats().map(c=>`<label><input type="checkbox" data-gcat="${c}" ${(h.guestCats||C.GUEST_CATS).includes(c)?"checked":""}> ${c}</label>`).join("")}</div><div class="actions" style="margin-top:12px"><button class="btn primary" data-act="saveGuestCats">حفظ</button></div></section>`:""}
+  ${f.guests!==false?`<section class="card"><div class="card-head"><h2 class="h">الضيوف</h2></div><p class="sub" style="margin:0 0 12px">الفئات اللي الضيف بيزوّد فيها حصة المستضيف:</p><div class="checks">${cats().map(c=>`<label><input type="checkbox" data-gcat="${c}" ${guestCats().includes(c)?"checked":""}> ${c}</label>`).join("")}</div><div class="actions" style="margin-top:12px"><button class="btn primary" data-act="saveGuestCats">حفظ</button></div></section>`:""}
   <section class="card"><div class="card-head"><h2 class="h">كود الدعوة</h2></div><div class="actions"><button class="btn" data-act="invite">${icon("key")} عرض الكود واللينك</button><button class="btn" data-act="newCode">كود جديد (يلغي القديم)</button></div></section>
   ${f.recurring!==false?`<section class="card"><div class="card-head"><h2 class="h">الفواتير الثابتة</h2><div class="actions"><button class="btn sm" data-act="addRec">${icon("plus")} بند</button><button class="btn sm primary" data-act="applyRec" ${(h.recurring||[]).length?"":"disabled"}>أضفها لـ ${esc(monthName(thisM))}</button></div></div>
    ${(h.recurring||[]).length?`<div class="list">${h.recurring.map((r,i)=>`<div class="row-item"><div class="grow"><b>${esc(r.title)}</b><div class="tiny">${esc(r.category)} · يدفعه ${esc(mName(r.paidBy))} · ${r.mode==="weight"?"بالأوزان":"بالتساوي"} · يوم ${+r.dueDay||1}</div></div><span class="amt">${money(r.amount)}</span><button class="btn sm icon danger" data-act="delRec" data-i="${i}">${icon("trash")}</button></div>`).join("")}</div>`:`<p class="sub" style="margin:0">زي الإيجار والإنترنت.</p>`}</section>`:""}
@@ -581,7 +582,7 @@ const nights=g=>Math.max(1,Math.round((new Date((g.to||g.from)+"T00:00:00")-new 
 function guests(head){
   const td=today(), can=canWrite()&&(isAdmin()||(PM("memberGuests")&&myMember()));
   const cur=S.guests.filter(g=>g.from<=td&&td<=(g.to||g.from)), up=S.guests.filter(g=>g.from>td), past=S.guests.filter(g=>(g.to||g.from)<td).sort((a,b)=>(b.from||"").localeCompare(a.from||""));
-  const cats=S.house.guestCats||C.GUEST_CATS;
+  const cats=guestCats();
   const row=g=>`<div class="row-item"><div class="ic-round acc">${icon("guest")}</div><div class="grow"><b>${esc(g.name)} — ضيف ${esc(mName(g.hostId))}</b><div class="tiny">${esc(g.from)}${g.to&&g.to!==g.from?" ← "+esc(g.to):""} · ${nights(g)} يوم · حصته ×${+g.factor||1}${g.note?" · "+esc(g.note):""}</div></div>${isAdmin()||g.createdBy===S.user.uid?`<div class="actions"><button class="btn sm icon" data-act="editGuest" data-id="${g.id}">${icon("edit")}</button><button class="btn sm icon danger" data-act="delGuest" data-id="${g.id}">${icon("trash")}</button></div>`:""}</div>`;
   const sec=(t,l)=>l.length?`<section class="card"><div class="card-head"><h2 class="h">${t}</h2><span class="chip">${l.length}</span></div><div class="list">${l.map(row).join("")}</div></section>`:"";
   return head("الضيوف",cats.length?`الضيف بيزوّد حصة اللي مستضيفه في: ${cats.join("، ")}`:"مفيش فئات متحددة للضيوف من «الإدارة»",can?`<button class="btn primary" data-act="addGuest">${icon("plus")} ضيف</button>`:"")+linkBanner()+
