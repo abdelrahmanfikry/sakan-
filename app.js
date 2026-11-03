@@ -13,7 +13,7 @@ const store = { get(k){ try{ return localStorage.getItem(k); }catch(_){ return n
 function applyTheme(){ const t=store.get("sakan-theme"); if(t) document.documentElement.dataset.theme=t; else delete document.documentElement.dataset.theme; }
 applyTheme();
 function isDark(){ const t=document.documentElement.dataset.theme; return t ? t==="dark" : matchMedia("(prefers-color-scheme: dark)").matches; }
-function toggleTheme(){ store.set("sakan-theme", isDark()?"light":"dark"); applyTheme(); render(); }
+function toggleTheme(){ const t=isDark()?"light":"dark"; store.set("sakan-theme",t); applyTheme(); render(); if(S.user) fbSet(doc(db,"memberships",S.user.uid),{prefs:{theme:t}},{merge:true}).catch(()=>{}); }
 
 /* ---------------- toast / copy / modal ---------------- */
 function toast(msg){ document.querySelectorAll(".toast").forEach(t=>t.remove()); const t=document.createElement("div"); t.className="toast"; t.textContent=msg; document.body.appendChild(t); setTimeout(()=>t.remove(),2800); }
@@ -54,7 +54,7 @@ function auditInfo(ref){ const p=ref.path.split("/"); if(p[0]!=="houses"||!S.hid
 function beforeOf(col,id){ if(col==="house") return S.house; if(col==="users") return S.users[id]||null; const a=S[col]; return Array.isArray(a)?(a.find(x=>x.id===id)||null):null; }
 const slim=o=>{ if(!o) return null; const c={}; for(const [k,v] of Object.entries(o)){ if(["id","log","votes","seenAt"].includes(k)) continue; c[k]=v; } return JSON.parse(JSON.stringify(c)); };
 async function audit(action,info,before,after){ if(!info||!S.user||!S.house) return; try{ await fbAdd(collection(db,"houses",S.hid,"audit"),{at:iso(),uid:S.user.uid,action,col:info.col,refId:info.id,before:slim(before),after:slim(after)}); }catch(e){ console.warn("audit",e); } }
-const quiet=(info,patch)=>info&&info.col==="users"&&Object.keys(patch||{}).every(k=>k==="seenAt");
+const quiet=(info,patch)=>info&&((info.col==="users"&&Object.keys(patch||{}).every(k=>["seenAt","lastActive","notifiedAt","device"].includes(k)))||(info.col==="house"&&Object.keys(patch||{}).every(k=>["lastBackupAt","backups"].includes(k))));
 async function addDoc(colRef,data){ const r=await fbAdd(colRef,data); const p=colRef.path.split("/"); if(p[0]==="houses"&&p[1]===S.hid&&p.length===3&&!AUDIT_SKIP.has(p[2])) audit("create",{col:p[2],id:r.id},null,data); return r; }
 async function updateDoc(ref,patch){ const info=auditInfo(ref); const b=info?beforeOf(info.col,info.id):null; await fbUpd(ref,patch); if(info&&!quiet(info,patch)) audit("update",info,b,patch); }
 async function deleteDoc(ref){ const info=auditInfo(ref); const b=info?beforeOf(info.col,info.id):null; await fbDel(ref); if(info) audit("delete",info,b,null); }
@@ -99,9 +99,11 @@ onAuthStateChanged(auth, async u=>{
   if(!u){ S.booting=false; return renderWelcome(); }
   onSnapshot(doc(db,"memberships",u.uid), async s=>{
     S.memberships = s.exists() ? (s.data().houses||{}) : {};
+    const prefs = s.exists() ? (s.data().prefs||{}) : {}; S.prefs=prefs;
+    if(prefs.theme && store.get("sakan-theme")!==prefs.theme){ store.set("sakan-theme",prefs.theme); applyTheme(); }
     const jc = joinCodeFromHash();
     if(jc){ history.replaceState(null,"",location.pathname); return joinFlow(jc); }
-    const ids=Object.keys(S.memberships); const saved=store.get("sakan-house");
+    const ids=Object.keys(S.memberships); const saved=store.get("sakan-house")||prefs.lastHouse;
     const want = S.hid && S.memberships[S.hid] ? S.hid : (saved && S.memberships[saved] ? saved : ids[0]);
     if(!want){ S.booting=false; stopHouse(); return renderNoHouse(); }
     if(want!==S.hid) openHouse(want);
@@ -115,6 +117,7 @@ function joinCodeFromHash(){ const m=location.hash.match(/join[=-]([A-Z0-9]{6})/
 function stopHouse(){ S.unsubs.forEach(f=>f()); S.unsubs=[]; S.loaded={}; LISTS.forEach(k=>S[k]= k==="users"?{}:[]); S.house=null; }
 function openHouse(hid){
   stopHouse(); S.hid=hid; store.set("sakan-house",hid); S.booting=true; render();
+  if(S.user&&S.prefs?.lastHouse!==hid) fbSet(doc(db,"memberships",S.user.uid),{prefs:{lastHouse:hid}},{merge:true}).catch(()=>{});
   const done=k=>{ S.loaded[k]=true; schedule(); };
   const err=k=>e=>{ console.error(k,e); done(k); };
   S.unsubs.push(onSnapshot(doc(db,"houses",hid), s=>{ if(!s.exists()){ leaveLocal(hid); return; } S.house={id:s.id,...s.data()}; done("house"); }, err("house")));
@@ -433,7 +436,7 @@ function members(head){
     <div class="actions" style="margin-top:4px">${F("instapay")&&pi.instapay?`<a class="chip ins" href="${esc(pi.instapay)}" target="_blank" rel="noopener noreferrer">إنستاباي ↗</a>`:""}${F("instapay")&&pi.ipa?`<button class="chip ins" data-copy="${esc(pi.ipa)}">${esc(pi.ipa)}</button>`:""}</div></div>
     ${showBal?`<span class="amt num ${x.net>0.009?"pos":x.net<-0.009?"neg":""}">${money(x.net)}</span>`:""}
     <div class="actions">${F("statement")&&showBal?`<button class="btn sm icon" data-act="statement" data-id="${m.id}" title="كشف حساب">${icon("receipt")}</button>`:""}${isAdmin()?`<button class="btn sm icon" data-act="editMem" data-id="${m.id}" title="تعديل">${icon("edit")}</button>`:""}</div></div>`}).join("")}</div>`:onboarding()}</section>
-  ${isAdmin()?`<section class="card"><div class="card-head"><h2 class="h">الحسابات والصلاحيات</h2><span class="tiny">مين داخل الموقع ودوره</span></div><div class="list">${usersList.map(([uid,x])=>`<div class="row-item"><img class="avatar" alt="" src="${esc(x.photo||"")}" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'"><div class="grow"><b>${esc(x.name||x.email||"مستخدم")}</b><div class="tiny">${esc(x.email||"")} · ${x.memberId?"مربوط بـ "+esc(mName(x.memberId)):"مش مربوط"}${uid===S.house.ownerUid?" · المالك":""}</div></div>
+  ${isAdmin()?`<section class="card"><div class="card-head"><h2 class="h">الحسابات والصلاحيات</h2><span class="tiny">مين داخل الموقع ودوره</span></div><div class="list">${usersList.map(([uid,x])=>`<div class="row-item"><img class="avatar" alt="" src="${esc(x.photo||"")}" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'"><div class="grow"><b>${esc(x.name||x.email||"مستخدم")}</b><div class="tiny">${esc(x.email||"")} · ${x.lastActive?"آخر ظهور "+esc(fmtDT(x.lastActive))+(x.device?" من "+esc(x.device):"")+" · ":""}${x.memberId?"مربوط بـ "+esc(mName(x.memberId)):"مش مربوط"}${uid===S.house.ownerUid?" · المالك":""}</div></div>
     <div class="actions"><select data-role="${uid}" ${uid===S.house.ownerUid?"disabled":""} style="width:auto">${Object.entries(C.ROLES).map(([k,l])=>`<option value="${k}" ${x.role===k?"selected":""}>${l}</option>`).join("")}</select>
     <select data-bind="${uid}" style="width:auto"><option value="">— الاسم —</option>${S.roster.map(m=>`<option value="${m.id}" ${x.memberId===m.id?"selected":""}>${esc(m.name)}</option>`).join("")}</select>
     ${uid!==S.house.ownerUid?`<button class="btn sm icon danger" data-act="kick" data-id="${uid}" title="إخراج">${icon("x")}</button>`:""}</div></div>`).join("")}</div></section>`:""}`;
@@ -496,6 +499,10 @@ function settings(head){
   ${f.meters!==false?`<section class="card"><div class="card-head"><h2 class="h">أسعار العدادات</h2></div><div class="form">${["كهرباء","مياه","غاز"].map(t=>`<label class="f">${t} — سعر الوحدة<input type="number" min="0" step="0.01" data-mp="${t}" data-k="unit" value="${(mp[t]||{}).unit||""}"></label><label class="f">${t} — رسوم ثابتة<input type="number" min="0" step="0.01" data-mp="${t}" data-k="fixed" value="${(mp[t]||{}).fixed||""}"></label>`).join("")}<div class="full"><button class="btn primary" data-act="saveMeters">حفظ</button></div></div></section>`:""}
   ${f.fund?`<section class="card"><div class="card-head"><h2 class="h">الصندوق</h2></div><div class="form"><label class="f">الاشتراك الشهري للفرد<input id="fMonthly" type="number" min="0" value="${fc.monthly||""}"></label><div class="full"><button class="btn primary" data-act="saveFund">حفظ</button></div></div></section>`:""}
   <section class="card"><div class="card-head"><h2 class="h">قفل الشهور</h2></div><p class="sub" style="margin:0 0 12px">الشهر المقفول محدش يعدّل فيه غير المدير.</p><div class="checks">${ms.map(m=>`<label><input type="checkbox" data-lock="${m}" ${(h.lockedMonths||[]).includes(m)?"checked":""}> ${esc(monthName(m))}</label>`).join("")}</div></section>
+  <section class="card"><div class="card-head"><h2 class="h">النسخ الاحتياطية على Firebase</h2><button class="btn sm primary" data-act="backupNow">${icon("shield")} نسخة دلوقتي</button></div>
+   <p class="sub" style="margin:0 0 12px">نسخة تلقائية كل أسبوع وقبل قفل أي شهر، وبيتحفظ آخر 12 نسخة. آخر نسخة: ${h.lastBackupAt?esc(fmtDT(h.lastBackupAt)):"لسه"}.</p>
+   ${(h.backups||[]).length?`<div class="list">${h.backups.map(b=>`<div class="row-item"><div class="ic-round acc">${icon("shield")}</div><div class="grow"><b>${esc(fmtDT(b.at))}</b><div class="tiny">${b.auto?"تلقائية":"يدوية"} · ${b.counts?.expenses??0} مصروف · ${b.counts?.payments??0} تحويل · ${Math.round((b.size||0)/1024)} KB</div></div><div class="actions"><button class="btn sm icon" data-act="bkDownload" data-id="${b.id}" title="تنزيل">${icon("download")}</button><button class="btn sm" data-act="bkRestore" data-id="${b.id}">استرجاع</button></div></div>`).join("")}</div>`:emptyBox("shield","مفيش نسخ لسه")}
+   <p class="tiny" style="margin:12px 0 0">صور الإيصالات مش داخلة في النسخة علشان حجمها.</p></section>
   <section class="card"><div class="card-head"><h2 class="h">البيانات</h2></div><div class="actions"><button class="btn" data-act="backup">${icon("download")} نسخة احتياطية JSON</button><button class="btn" data-act="csv">${icon("download")} المصاريف CSV</button></div></section>
   <section class="card"><div class="card-head"><h2 class="h neg">منطقة الخطر</h2></div><div class="actions">${isOwner()?`<button class="btn danger" data-act="deleteHouse">${icon("trash")} حذف السكن نهائيًا</button>`:`<button class="btn danger" data-act="leave">${icon("door")} خروج من السكن</button>`}</div></section>`;
 }
@@ -516,19 +523,28 @@ function personSection(){
 async function importFile(file){
   if(!file) return; if(!isAdmin()) return toast("الاستيراد للمدير بس");
   let d; try{ d=JSON.parse(await file.text()); }catch(_){ return toast("الملف ده مش JSON سليم"); }
-  const roster=d.roster||[], ex=d.expenses||[], pays=d.payments||[];
-  if(!roster.length) return toast("الملف مفيهوش سكان");
-  const tot=ex.reduce((a,e)=>a+(+e.amount||0),0);
-  confirmBox(`استيراد ${roster.length} ساكن و${ex.length} مصروف و${pays.length} تحويل؟`,"استورد",()=>run(async()=>{
+  importData(d,false);
+}
+function importData(d,isRestore){
+  if(!isAdmin()) return toast("للمدير بس");
+  const cols=BK_COLS.filter(k=>Array.isArray(d[k])&&d[k].length); if(!(d.roster||[]).length) return toast("الملف مفيهوش سكان");
+  const n=k=>(d[k]||[]).length; const tot=(d.expenses||[]).reduce((a,e)=>a+(+e.amount||0),0);
+  confirmBox(isRestore?`ترجّع النسخة دي؟ (${n("roster")} ساكن · ${n("expenses")} مصروف · ${n("payments")} تحويل)`:`استيراد ${n("roster")} ساكن و${n("expenses")} مصروف و${n("payments")} تحويل؟`,isRestore?"رجّع":"استورد",()=>run(async()=>{
+    if(isRestore) await autoBackup(true);
     const now=iso(), uid=S.user.uid; const ops=[];
-    roster.forEach((m,i)=>ops.push([H("roster",m.id),{name:m.name,order:S.roster.length+i,weight:+m.weight||1,active:m.active!==false,room:m.room||"",deposit:+m.deposit||0,instapay:safeUrl(m.instapay)||"",ipa:m.ipa||"",wallet:m.wallet||"",phone:m.phone||"",createdAt:now}]));
-    ex.forEach(e=>ops.push([H("expenses",e.id),{title:e.title,amount:r2(e.amount),date:e.date,month:monthOf(e.date),category:e.category||"أخرى",paidBy:e.paidBy,split:e.split,note:e.note||"",receiptId:null,recurring:false,createdBy:uid,createdAt:e.createdAt||now,imported:true}]));
-    pays.forEach(p=>ops.push([H("payments",p.id),{from:p.from,to:p.to,amount:r2(p.amount),date:p.date,month:monthOf(p.date),method:p.method||"",note:p.note||"",status:"confirmed",confirmedAt:now,confirmedBy:uid,createdBy:uid,createdAt:p.createdAt||now,imported:true}]));
+    cols.forEach(k=>d[k].forEach((x,i)=>{ if(!x||!x.id) return; const v={...x}; delete v.id;
+      if(k==="roster"){ v.order=v.order??(S.roster.length+i); v.weight=+v.weight||1; v.active=v.active!==false; if(v.instapay) v.instapay=safeUrl(v.instapay)||""; }
+      if(k==="expenses"){ v.amount=r2(v.amount); v.month=monthOf(v.date); v.category=v.category||"أخرى"; v.createdBy=v.createdBy||uid; v.createdAt=v.createdAt||now; if(v.receiptId===undefined) v.receiptId=null; }
+      if(["payments","loans","fund"].includes(k)){ v.amount=r2(v.amount); if(v.date) v.month=monthOf(v.date); v.status=v.status||"confirmed"; v.createdBy=v.createdBy||uid; v.createdAt=v.createdAt||now; }
+      ops.push([H(k,x.id),v]); }));
     for(let i=0;i<ops.length;i+=400){ const bt=writeBatch(db); ops.slice(i,i+400).forEach(([r,v])=>bt.set(r,v)); await bt.commit(); }
-    const patch={}; if(Array.isArray(d.categories)&&d.categories.length) patch.categories=[...new Set([...(S.house.categories||[]),...d.categories])]; if(d.houseName&&!S.house.name) patch.name=d.houseName; if(Object.keys(patch).length) await updateDoc(doc(db,"houses",S.hid),patch);
+    const patch={}; const hs=d.house||{};
+    if(isRestore) BK_HOUSE.forEach(k=>{ if(hs[k]!==undefined&&k!=="name") patch[k]=hs[k]; });
+    const cl=d.categories||hs.categories; if(!isRestore&&Array.isArray(cl)&&cl.length) patch.categories=[...new Set([...(S.house.categories||[]),...cl])];
+    if(Object.keys(patch).length) await updateDoc(doc(db,"houses",S.hid),patch);
     if(d.me&&!myMember()) await updateDoc(H("users",uid),{memberId:d.me});
-    await fbAdd(collection(db,"houses",S.hid,"audit"),{at:iso(),uid,action:"create",col:"import",refId:"import",before:null,after:{title:`استيراد ${roster.length} ساكن و${ex.length} مصروف (${money(tot)}) و${pays.length} تحويل`}});
-  },"اتستوردت البيانات"),"البيانات هتتضاف على اللي موجود في السكن.");
+    await fbAdd(collection(db,"houses",S.hid,"audit"),{at:iso(),uid,action:"create",col:"import",refId:isRestore?"restore":"import",before:null,after:{title:`${isRestore?"استرجاع نسخة":"استيراد"}: ${n("roster")} ساكن و${n("expenses")} مصروف (${money(tot)}) و${n("payments")} تحويل`}});
+  },isRestore?"النسخة اترجّعت":"اتستوردت البيانات"),isRestore?"اللي في النسخة هيرجع زي ما كان، والحاجات اللي اتضافت بعدها هتفضل. هتتعمل نسخة من الوضع الحالي الأول.":"البيانات هتتضاف على اللي موجود في السكن.");
 }
 
 /* ---------------- new features ---------------- */
@@ -558,10 +574,10 @@ function notifs(head){
 }
 function sysNotify(){
   if(!F("notifications")||!("Notification" in window)||Notification.permission!=="granted") return;
-  const key="sakan-notified-"+S.hid, last=store.get(key), ev=myEvents();
-  if(!last){ store.set(key,iso()); return; }
+  const key="sakan-notified-"+S.hid, ev=myEvents(); const a=store.get(key)||"", b=me().notifiedAt||""; const last=a>b?a:b;
+  if(!last){ store.set(key,iso()); updateDoc(H("users",S.user.uid),{notifiedAt:iso()}).catch(()=>{}); return; }
   const fresh=ev.filter(e=>e.at>last).slice(0,5); if(!fresh.length) return;
-  store.set(key,fresh[0].at);
+  store.set(key,fresh[0].at); updateDoc(H("users",S.user.uid),{notifiedAt:fresh[0].at}).catch(()=>{});
   if(!document.hidden) return;
   const title=S.house?.name||"سكن";
   fresh.forEach(e=>{ const opt={body:e.t,icon:"icon-192.png",badge:"icon-192.png",tag:"sakan-"+e.at,lang:"ar",dir:"rtl"};
@@ -575,7 +591,27 @@ function autoRecurring(){
     setDoc(H("expenses",id),{title:r.title,amount:r2(r.amount),category:r.category,paidBy:r.paidBy,date,month:m,split:{mode:r.mode,members:active().map(x=>x.id)},note:"بند شهري ثابت — اتضاف تلقائيًا",recurring:true,receiptId:null,createdBy:S.user.uid,createdAt:iso()})
       .then(()=>toast(`اتضاف «${r.title}» تلقائيًا`)).catch(e=>console.warn(e)); }
 }
-function afterData(){ if(!S.user||!S.hid||!S.house) return; if(!["house","users","roster","expenses","payments"].every(k=>S.loaded[k])) return; autoRecurring(); sysNotify(); }
+function afterData(){ if(!S.user||!S.hid||!S.house) return; if(!["house","users","roster","expenses","payments"].every(k=>S.loaded[k])) return; autoRecurring(); sysNotify(); touchActive(); autoBackup(false); }
+function touchActive(){ if(S.activeTouched||!S.users[S.user.uid]) return; S.activeTouched=true; const la=me().lastActive||""; if(la&&Date.now()-new Date(la)<10*60e3) return;
+  const ua=navigator.userAgent; const device=/iPhone|iPad/.test(ua)?"آيفون":/Android/.test(ua)?"أندرويد":/Windows/.test(ua)?"ويندوز":/Mac/.test(ua)?"ماك":"جهاز تاني";
+  updateDoc(H("users",S.user.uid),{lastActive:iso(),device}).catch(()=>{}); }
+const BK_COLS=["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings"];
+const BK_HOUSE=["name","currency","features","perms","categories","recurring","budgets","guestCats","meterPrices","fundCfg","rulesText","depositHolder","lockedMonths","recSkip"];
+function backupData(){ const o={version:2,exportedAt:iso(),houseName:S.house.name,house:{}}; BK_HOUSE.forEach(k=>{ if(S.house[k]!==undefined) o.house[k]=S.house[k]; });
+  o.users=Object.fromEntries(Object.entries(S.users).map(([u,x])=>[u,{name:x.name||"",role:x.role,memberId:x.memberId||null}])); BK_COLS.forEach(k=>o[k]=S[k]); return o; }
+async function autoBackup(force){
+  if(!isAdmin()||S.backupBusy) return; if(!BK_COLS.every(k=>S.loaded[k])) return;
+  const last=S.house.lastBackupAt||""; if(!force&&last&&Date.now()-new Date(last)<7*864e5) return;
+  if(!force&&!S.expenses.length) return;
+  S.backupBusy=true;
+  try{ const d=backupData(); const json=JSON.stringify(d); if(json.length>950000){ if(force) toast("البيانات كبيرة على النسخة — نزّلها JSON"); return; }
+    const id=new Date().toISOString().replace(/[:.]/g,"-"); const counts={expenses:S.expenses.length,payments:S.payments.length,roster:S.roster.length};
+    await fbSet(H("backups",id),{at:iso(),by:S.user.uid,size:json.length,counts,data:json});
+    let idx=[{id,at:iso(),size:json.length,counts,auto:!force},...(S.house.backups||[])]; const extra=idx.slice(12); idx=idx.slice(0,12);
+    await fbUpd(doc(db,"houses",S.hid),{lastBackupAt:iso(),backups:idx});
+    for(const x of extra) await fbDel(H("backups",x.id)).catch(()=>{});
+    if(force) toast("اتعملت نسخة احتياطية على Firebase");
+  }catch(e){ console.warn("backup",e); if(force) fail(e); } finally{ S.backupBusy=false; } }
 function quickAddBox(){ if(!F("quickAdd")||!canAddExp()) return "";
   return `<section class="card"><div class="card-head"><h2 class="h">${icon("sparkle")} إضافة بجملة</h2><span class="tiny">مثال: أحمد دفع 300 أكل على الكل</span></div><div class="actions"><input id="qaText" placeholder="مين دفع كام على إيه وعلى مين…" maxlength="160" style="flex:1 1 240px"><button class="btn primary" data-act="quickParse">كمّل</button></div></section>`; }
 const nights=g=>Math.max(1,Math.round((new Date((g.to||g.from)+"T00:00:00")-new Date(g.from+"T00:00:00"))/864e5)+1);
@@ -954,10 +990,13 @@ function handle(a,b={dataset:{}}){
     case "delLoan": return confirmBox("حذف السلفة؟","احذف",()=>run(()=>deleteDoc(H("loans",id)),"اتحذفت"));
     case "enableNotif": { if(!("Notification" in window)) return toast("المتصفح ده مش بيدعم الإشعارات"); return Notification.requestPermission().then(p=>{ if(p==="granted"){ store.set("sakan-notified-"+S.hid,iso()); toast("الإشعارات اتفعّلت"); } else toast("الإشعارات ما اتفعّلتش"); render(); }); }
     case "report": return printReport(b.dataset.m);
-    case "closeMonth": { const m=b.dataset.m; return confirmBox(`تقفل حساب ${monthName(m)}؟`,"اقفل الشهر",()=>run(async()=>{ await setDoc(H("closings",m),{month:m,...monthSnapshot(m),closedAt:iso(),closedBy:S.user.uid}); const st=new Set(S.house.lockedMonths||[]); st.add(m); await updateDoc(doc(db,"houses",S.hid),{lockedMonths:[...st]}); },"الشهر اتقفل"),"الأعضاء مش هيقدروا يضيفوا أو يعدّلوا فيه. تقدر تفتحه تاني."); }
+    case "closeMonth": { const m=b.dataset.m; return confirmBox(`تقفل حساب ${monthName(m)}؟`,"اقفل الشهر",()=>run(async()=>{ await autoBackup(true); await setDoc(H("closings",m),{month:m,...monthSnapshot(m),closedAt:iso(),closedBy:S.user.uid}); const st=new Set(S.house.lockedMonths||[]); st.add(m); await updateDoc(doc(db,"houses",S.hid),{lockedMonths:[...st]}); },"الشهر اتقفل"),"الأعضاء مش هيقدروا يضيفوا أو يعدّلوا فيه. تقدر تفتحه تاني."); }
     case "reopenMonth": { const m=b.dataset.m; return confirmBox(`تفتح حساب ${monthName(m)} تاني؟`,"افتح",()=>run(async()=>{ await deleteDoc(H("closings",m)); const st=new Set(S.house.lockedMonths||[]); st.delete(m); await updateDoc(doc(db,"houses",S.hid),{lockedMonths:[...st]}); },"الشهر اتفتح"),"الأعضاء هيقدروا يعدّلوا فيه تاني."); }
     case "csv": return exportCsv();
     case "backup": return backup();
+    case "backupNow": return autoBackup(true);
+    case "bkDownload": return (async()=>{ try{ const s2=await getDoc(H("backups",id)); if(!s2.exists()) return toast("النسخة مش موجودة"); download(`sakan-backup-${id.slice(0,10)}.json`,s2.data().data,"application/json"); }catch(e){ fail(e); } })();
+    case "bkRestore": return (async()=>{ try{ const s2=await getDoc(H("backups",id)); if(!s2.exists()) return toast("النسخة مش موجودة"); importData(JSON.parse(s2.data().data),true); }catch(e){ fail(e); } })();
     case "leave": return confirmBox("تخرج من السكن ده؟","خروج",()=>run(async()=>{ await deleteDoc(H("users",S.user.uid)); await setDoc(doc(db,"memberships",S.user.uid),{houses:{[S.hid]:deleteField()}},{merge:true}); S.hid=null; },"خرجت من السكن"));
     case "deleteHouse": return confirmBox("حذف السكن نهائيًا؟","احذف السكن",()=>run(async()=>{ const hid=S.hid; await setDoc(doc(db,"memberships",S.user.uid),{houses:{[hid]:deleteField()}},{merge:true}); if(S.house.joinCode) await deleteDoc(doc(db,"codes",S.house.joinCode)).catch(()=>{}); await deleteDoc(doc(db,"houses",hid)); S.hid=null; },"اتحذف السكن"),"نزّل نسخة احتياطية الأول. السكان التانيين هيتشالوا من السكن.");
   }
@@ -968,8 +1007,7 @@ function exportCsv(){ const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
   filtered().forEach(e=>rows.push(["مصروف",e.date,e.title,e.category,mName(e.paidBy),"",Object.entries(C.shares(e,S.roster)).map(([k,v])=>`${mName(k)}:${r2(v)}`).join(" | "),e.amount,"",e.note||""]));
   S.payments.filter(p=>!S.f.month||monthOf(p.date)===S.f.month).forEach(p=>rows.push(["دفعة",p.date,p.method||"","",mName(p.from),mName(p.to),"",p.amount,C.confirmed(p)?"مؤكدة":"مستنية",p.note||""]));
   download(`sakan-${S.f.month||"all"}.csv`,"﻿"+rows.map(r=>r.map(q).join(",")).join("\r\n"),"text/csv;charset=utf-8"); }
-function backup(){ const o={exportedAt:iso(),house:S.house}; ["users","roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts"].forEach(k=>o[k]=S[k]);
-  download(`sakan-backup-${today()}.json`,JSON.stringify(o,null,2),"application/json"); }
+function backup(){ download(`sakan-backup-${today()}.json`,JSON.stringify(backupData(),null,2),"application/json"); }
 
 /* ---------------- PWA ---------------- */
 if("serviceWorker" in navigator && location.protocol==="https:") navigator.serviceWorker.register("./sw.js").catch(()=>{});

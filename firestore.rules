@@ -166,6 +166,12 @@ service cloud.firestore {
         allow read: if isMember(h);
         allow write: if isAdmin(h);
       }
+
+      // نسخ احتياطية تلقائية جوه Firebase
+      match /backups/{id} {
+        allow read: if isMember(h);
+        allow write: if isAdmin(h);
+      }
     }
   }
 }
