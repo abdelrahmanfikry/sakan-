@@ -156,6 +156,20 @@ service cloud.firestore {
         allow delete: if isAdmin(h) || (isWriter(h) && resource.data.status == 'pending' && (mine() || resource.data.to == myMember(h)));
       }
 
+      // ذاكرة الأسعار
+      match /prices/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped();
+        allow update, delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
+      // حصالة الإيجار (للتنظيم بس — مش بتأثر على الحسابات)
+      match /jar/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) || request.resource.data.memberId == myMember(h));
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
       // سجل التعديلات: إضافة بس — محدش يعدّل أو يمسح
       match /audit/{id} {
         allow read: if isMember(h);
