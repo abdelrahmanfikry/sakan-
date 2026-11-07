@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, addDoc as fbAdd, setDoc as fbSet, updateDoc as fbUpd, deleteDoc as fbDel, getDoc, writeBatch, deleteField, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
-import * as C from "./core.js?v=5";
+import * as C from "./core.js?v=6";
 const { esc, r2, today, monthOf, monthName, iso, fmtDT, safeUrl, waPhone, icon, FUND } = C;
 
 const root = document.getElementById("root");
@@ -61,9 +61,9 @@ async function deleteDoc(ref){ const info=auditInfo(ref); const b=info?beforeOf(
 async function setDoc(ref,d,o){ const info=auditInfo(ref); const b=info?beforeOf(info.col,info.id):null; await fbSet(ref,d,o); if(info) audit(b?"update":"create",info,b,d); }
 
 /* ---------------- state ---------------- */
-const LISTS=["users","roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","audit","closings","prices","jar"];
+const LISTS=["users","roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","audit","closings","prices","jar","bookings"];
 const S = { user:null, memberships:{}, hid:null, house:null, users:{}, roster:[], expenses:[], payments:[], fund:[], shopping:[], chores:[], notes:[], polls:[], meters:[], items:[], contacts:[],
-  guests:[], loans:[], audit:[], closings:[], prices:[], jar:[], weekOff:0, autoRec:new Set(), seenBefore:null,
+  guests:[], loans:[], audit:[], closings:[], prices:[], jar:[], bookings:[], weekOff:0, bk:{res:"",day:0}, autoRec:new Set(), seenBefore:null,
   loaded:{}, unsubs:[], view:"home", f:{month:"",cat:"",mem:"",q:""}, showBought:false, dirty:false, booting:true };
 const guestCats = () => S.house?.guestCats || [...new Set(C.GUEST_CATS.map(mapCat).concat(cats().filter(c=>["سوبرماركت","بقالة"].includes(c))))].filter(c=>c!=="أخرى");
 const cats = () => (S.house?.categories?.length ? S.house.categories : C.CATS);
@@ -124,7 +124,7 @@ function openHouse(hid){
   S.unsubs.push(onSnapshot(collection(db,"houses",hid,"users"), s=>{ S.users={}; s.docs.forEach(d=>S.users[d.id]=d.data()); done("users");
     if(S.user && !S.users[S.user.uid] && S.loaded.house===true){ leaveLocal(hid); } }, err("users")));
   const sorters={roster:(a,b)=>(a.order??0)-(b.order??0)};
-  ["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar"].forEach(k=>
+  ["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar","bookings"].forEach(k=>
     S.unsubs.push(onSnapshot(collection(db,"houses",hid,k), s=>{ S[k]=s.docs.map(d=>({id:d.id,...d.data()})); sorters[k]&&S[k].sort(sorters[k]); done(k); }, err(k))));
   S.unsubs.push(onSnapshot(query(collection(db,"houses",hid,"audit"),orderBy("at","desc"),limit(300)), s=>{ S.audit=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||"").localeCompare(a.at||"")); done("audit"); }, err("audit")));
 }
@@ -188,7 +188,7 @@ async function joinFlow(code){
 /* ---------------- navigation ---------------- */
 const NAV=[
   ["home","الرئيسية","home",null],["notifs","الإشعارات","bell","notifications"],["expenses","المصاريف","receipt",null],["payments","التسويات","swap","payments"],["loans","السلف","hand","loans"],["fund","الصندوق","piggy","fund"],
-  ["shopping","المشتريات","cart","shopping"],["prices","الأسعار","tag","prices"],["jar","حصالة الإيجار","piggy","rentJar"],["weekly","تقرير الأسبوع","sparkle","weekly"],["chores","المهام","broom","chores"],["guests","الضيوف","guest","guests"],["board","الإعلانات","mega","board"],["polls","التصويت","poll","polls"],
+  ["shopping","المشتريات","cart","shopping"],["prices","الأسعار","tag","prices"],["jar","حصالة الإيجار","piggy","rentJar"],["booking","الحجز","washer","booking"],["weekly","تقرير الأسبوع","sparkle","weekly"],["chores","المهام","broom","chores"],["guests","الضيوف","guest","guests"],["board","الإعلانات","mega","board"],["polls","التصويت","poll","polls"],
   ["meters","العدادات","bolt","meters"],["deposits","التأمين والعهد","shield","deposits"],["contacts","أرقام وقوانين","phone","contacts"],
   ["members","الأعضاء","users",null],["stats","الإحصائيات","chart","stats"],["closing","قفل الشهر","file","closing"],["activity","النشاط","clock","activity"],["audit","سجل التعديلات","history","audit"],["settings","الإدارة","gear","@admin"]];
 const navItems = () => NAV.filter(([, , , f])=> f===null || (f==="@admin"?isAdmin():F(f)));
@@ -232,7 +232,7 @@ function render(){
   if(ready) bindView();
 }
 function viewHtml(){
-  const V={prices:pricesView,jar:jarView,weekly:weeklyView,home,notifs,expenses,payments,loans,fund,shopping,chores,guests,board,polls,meters,deposits,contacts,members,stats,closing,activity,audit:auditView,settings};
+  const V={booking:bookingView,prices:pricesView,jar:jarView,weekly:weeklyView,home,notifs,expenses,payments,loans,fund,shopping,chores,guests,board,polls,meters,deposits,contacts,members,stats,closing,activity,audit:auditView,settings};
   const head=(t,s,tools="")=>`<div class="topbar"><div><h1>${t}</h1>${s?`<div class="sub">${s}</div>`:""}</div><div class="tools">${tools}</div></div>`;
   return (V[S.view]||home)(head);
 }
@@ -298,6 +298,7 @@ function home(head){
     <div class="row"><span class="pill">مصاريف ${esc(monthName(m))} ${money(totM)}</span>${fundBal!==null?`<span class="pill">الصندوق ${money(fundBal)}</span>`:""}${openPolls?`<span class="pill">${openPolls} تصويت مستني صوتك</span>`:""}</div>
     <div class="row">${canAddExp()?`<button class="btn" data-act="addExp">${icon("plus")} مصروف</button>`:""}${mine&&F("statement")?`<button class="btn ghost" data-act="statement" data-id="${mine}">${icon("receipt")} كشف حسابي</button>`:""}</div></section>
   ${alerts.length?`<section class="card"><div class="card-head"><h2 class="h">محتاج انتباهك</h2><span class="chip neg">${alerts.length}</span></div><div class="list">${alerts.join("")}</div></section>`:""}
+  ${homeBook()}
   ${homeJar()}
   ${F("weekly")&&["5","6"].includes(String(new Date().getDay()))?`<section class="card"><div class="row-item" style="border:0;padding:0"><div class="ic-round acc">${icon("sparkle")}</div><div class="grow"><b>تقرير الأسبوع جاهز 😄</b><div class="tiny">مين شايل السكن ومين نايم في العسل — ابعته للجروب</div></div><button class="btn sm primary" data-go="weekly">افتحه</button></div></section>`:""}
   ${F("payments")?`<section class="card"><div class="card-head"><h2 class="h">تحويلاتك</h2><button class="btn sm ghost" data-go="payments">كل التسويات</button></div>${myPlan.length?`<div class="settle">${myPlan.map(settleCard).join("")}</div>`:emptyBox("check",mine?"مفيش عليك ولا ليك تحويلات":"اختار اسمك علشان تشوف تحويلاتك")}</section>`:""}
@@ -545,6 +546,54 @@ function importData(d,isRestore){
   },isRestore?"النسخة اترجّعت":"اتستوردت البيانات"),isRestore?"اللي في النسخة هيرجع زي ما كان، والحاجات اللي اتضافت بعدها هتفضل. هتتعمل نسخة من الوضع الحالي الأول.":"البيانات هتتضاف على اللي موجود في السكن.");
 }
 
+/* ---------------- الحجوزات ---------------- */
+const resList = () => (S.house?.resources?.length ? S.house.resources : C.DEFAULT_RES);
+const nowHM = () => { const d=new Date(); return C.fromMin(d.getHours()*60+d.getMinutes()); };
+const dayOff = n => { const d=new Date(today()+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()+n); return d.toISOString().slice(0,10); };
+const dayLbl = (d) => d===today()?"النهارده":d===dayOff(1)?"بكرة":new Date(d+"T00:00:00").toLocaleDateString("ar-EG",{weekday:"long",day:"numeric",month:"short"});
+function resNow(r){ const t=nowHM(), d=today(); const cur=S.bookings.find(b=>b.res===r.id&&b.date===d&&b.start<=t&&b.end>t);
+  const next=S.bookings.filter(b=>b.res===r.id&&(b.date>d||(b.date===d&&b.start>t))).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start))[0]; return {cur,next}; }
+function homeBook(){ if(!F("booking")) return ""; const mine=myMember(), d=today(), t=nowHM();
+  const my=S.bookings.filter(b=>b.memberId===mine&&(b.date>d||(b.date===d&&b.end>t))).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start)).slice(0,2);
+  const busy=resList().map(r=>({r,...resNow(r)})).filter(x=>x.cur);
+  if(!my.length&&!busy.length) return "";
+  return `<section class="card"><div class="card-head"><h2 class="h">${icon("washer")} الحجز</h2><button class="btn sm ghost" data-go="booking">الجدول</button></div><div class="list">
+   ${busy.map(x=>`<div class="row-item"><div class="ic-round neg">${icon("washer")}</div><div class="grow"><b>${esc(x.r.name)} مشغول دلوقتي</b><div class="tiny">مع ${esc(mName(x.cur.memberId))} لحد ${C.fmt12(x.cur.end)}</div></div></div>`).join("")}
+   ${my.map(b=>`<div class="row-item"><div class="ic-round acc">${icon("clock")}</div><div class="grow"><b>حجزك: ${esc((resList().find(r=>r.id===b.res)||{}).name||b.res)}</b><div class="tiny">${esc(dayLbl(b.date))} · ${C.fmt12(b.start)} ← ${C.fmt12(b.end)}</div></div></div>`).join("")}</div></section>`; }
+function bookingView(head){
+  const rs=resList(); if(!S.bk.res||!rs.find(r=>r.id===S.bk.res)) S.bk.res=rs[0].id; const r=rs.find(x=>x.id===S.bk.res);
+  const day=dayOff(S.bk.day||0), mine=myMember(), t=nowHM();
+  const list=S.bookings.filter(b=>b.res===r.id&&b.date===day).sort((a,b)=>a.start.localeCompare(b.start));
+  const {cur,next}=resNow(r);
+  return head("الحجز","مواعيد بالدور — محدش يحجز فوق حد",isAdmin()?`<button class="btn" data-act="resCfg">${icon("gear")} الحاجات</button>`:"")+linkBanner()+
+  `<div class="actions" style="margin-bottom:12px">${rs.map(x=>`<button class="btn ${x.id===r.id?"primary":""}" data-act="bkRes" data-id="${esc(x.id)}">${esc(x.name)}</button>`).join("")}</div>
+  <section class="hero"><div class="l">${esc(r.name)} دلوقتي</div><div class="big" style="font-size:26px">${cur?`مع ${esc(mName(cur.memberId))}`:"فاضي ✓"}</div>
+   <div class="row">${cur?`<span class="pill">لحد ${C.fmt12(cur.end)}</span>`:""}${next?`<span class="pill">الجاي: ${esc(mName(next.memberId))} ${next.date===today()?"":esc(dayLbl(next.date))+" "}${C.fmt12(next.start)}</span>`:""}</div>
+   ${canWrite()&&mine?`<div class="row"><button class="btn" data-act="addBook">${icon("plus")} احجز</button>${!cur?`<button class="btn ghost" data-act="bookNow">ابدأ دلوقتي (${r.slot>=60?(r.slot/60)+" ساعة":r.slot+" دقيقة"})</button>`:""}</div>`:""}</section>
+  <div class="actions" style="margin:12px 0;overflow-x:auto;flex-wrap:nowrap">${[0,1,2,3,4,5,6].map(i=>`<button class="btn sm ${i===(S.bk.day||0)?"primary":""}" data-act="bkDay" data-i="${i}" style="white-space:nowrap">${esc(dayLbl(dayOff(i)))}</button>`).join("")}</div>
+  <section class="card"><div class="card-head"><h2 class="h">${esc(dayLbl(day))}</h2><span class="chip">${list.length} حجز</span></div>
+   ${list.length?`<div class="list">${list.map(b=>{ const live=b.date===today()&&b.start<=t&&b.end>t, past=b.date===today()&&b.end<=t; return `<div class="row-item ${past?"done":""}"><div class="ic-round ${live?"neg":b.memberId===mine?"acc":""}">${icon("washer")}</div><div class="grow"><b>${C.fmt12(b.start)} ← ${C.fmt12(b.end)}</b><div class="tiny">${esc(mName(b.memberId))}${b.memberId===mine?" (انت)":""}${b.note?" · "+esc(b.note):""}${live?" · شغال دلوقتي":""}</div></div>${isAdmin()||b.createdBy===S.user.uid?`<button class="btn sm icon danger" data-act="delBook" data-id="${b.id}">${icon("trash")}</button>`:""}</div>`; }).join("")}</div>`:emptyBox("washer","مفيش حجوزات","اليوم ده فاضي كله.")}</section>`;
+}
+function bookModal(preset={}){
+  const rs=resList(), r=rs.find(x=>x.id===(preset.res||S.bk.res))||rs[0], day=preset.date||dayOff(S.bk.day||0);
+  const t=nowHM(); const start=day===today()?C.fromMin(Math.ceil(C.toMin(t)/15)*15):"10:00";
+  modal(`<h3>احجز<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="form">
+   <label class="f">إيه؟<select id="bkR">${rs.map(x=>`<option value="${esc(x.id)}" ${x.id===r.id?"selected":""}>${esc(x.name)}</option>`).join("")}</select></label>
+   <label class="f">اليوم<input id="bkD" type="date" value="${day}" min="${today()}"></label>
+   <label class="f">من<input id="bkS" type="time" value="${start}" step="300"></label>
+   <label class="f">المدة (دقيقة)<input id="bkM" type="number" min="5" max="600" step="5" value="${r.slot||60}"></label>
+   <label class="f full">ملاحظة<input id="bkN" maxlength="60" placeholder="اختياري — مثلًا: غسيل أبيض"></label>
+   <div class="full tiny" id="bkH"></div></div>
+   <div class="mfoot"><button class="btn primary" id="bkSave">احجز</button><button class="btn" data-close>إلغاء</button></div>`,ov=>{
+    const R=ov.querySelector("#bkR"), M=ov.querySelector("#bkM"); R.onchange=()=>{ const x=rs.find(y=>y.id===R.value); if(x) M.value=x.slot||60; };
+    ov.querySelector("#bkSave").onclick=async()=>{ const b={res:R.value,date:ov.querySelector("#bkD").value||today(),start:ov.querySelector("#bkS").value};
+      const mins=+M.value||60; if(!b.start) return toast("اختار الساعة"); b.end=C.fromMin(Math.min(24*60-1,C.toMin(b.start)+mins));
+      if(b.date===today()&&b.end<=nowHM()) return toast("الوقت ده عدّى");
+      const clash=S.bookings.find(x=>C.overlaps(x,b)); if(clash){ ov.querySelector("#bkH").innerHTML=`<span class="neg">محجوز لـ ${esc(mName(clash.memberId))} من ${C.fmt12(clash.start)} لـ ${C.fmt12(clash.end)} — اختار وقت تاني</span>`; return; }
+      try{ await addDoc(HC("bookings"),{...b,note:ov.querySelector("#bkN").value.trim(),memberId:myMember(),createdBy:S.user.uid,createdAt:iso()}); closeModal(); toast(`اتحجز ${C.fmt12(b.start)} ← ${C.fmt12(b.end)}`); }catch(e){ fail(e); } };
+  });
+}
+
 /* ---------------- ذاكرة الأسعار ---------------- */
 const priceAlerts = () => { const lim=C.weekRange(0).from; const d=new Date(lim+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()-7); const since=d.toISOString().slice(0,10);
   return C.priceGroups(S.prices).filter(g=>g.prev&&g.change>=10&&(g.last.date||"")>=since); };
@@ -720,8 +769,8 @@ function afterData(){ if(!S.user||!S.hid||!S.house) return; if(!["house","users"
 function touchActive(){ if(S.activeTouched||!S.users[S.user.uid]) return; S.activeTouched=true; const la=me().lastActive||""; if(la&&Date.now()-new Date(la)<10*60e3) return;
   const ua=navigator.userAgent; const device=/iPhone|iPad/.test(ua)?"آيفون":/Android/.test(ua)?"أندرويد":/Windows/.test(ua)?"ويندوز":/Mac/.test(ua)?"ماك":"جهاز تاني";
   updateDoc(H("users",S.user.uid),{lastActive:iso(),device}).catch(()=>{}); }
-const BK_COLS=["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar"];
-const BK_HOUSE=["jarCfg","name","currency","features","perms","categories","recurring","budgets","guestCats","meterPrices","fundCfg","rulesText","depositHolder","lockedMonths","recSkip"];
+const BK_COLS=["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar","bookings"];
+const BK_HOUSE=["resources","jarCfg","name","currency","features","perms","categories","recurring","budgets","guestCats","meterPrices","fundCfg","rulesText","depositHolder","lockedMonths","recSkip"];
 function backupData(){ const o={version:2,exportedAt:iso(),houseName:S.house.name,house:{}}; BK_HOUSE.forEach(k=>{ if(S.house[k]!==undefined) o.house[k]=S.house[k]; });
   o.users=Object.fromEntries(Object.entries(S.users).map(([u,x])=>[u,{name:x.name||"",role:x.role,memberId:x.memberId||null}])); BK_COLS.forEach(k=>o[k]=S[k]); return o; }
 async function autoBackup(force){
@@ -790,7 +839,7 @@ function printReport(m){
   setTimeout(()=>window.print(),150);
 }
 window.addEventListener("afterprint",()=>{ const pr=document.getElementById("printRoot"); if(pr) pr.innerHTML=""; });
-const COL_AR={import:"بيانات",expenses:"مصروف",payments:"دفعة",fund:"اشتراك صندوق",roster:"ساكن",users:"حساب",house:"إعدادات السكن",shopping:"مشتريات",chores:"مهمة",notes:"إعلان",polls:"تصويت",meters:"قراية عداد",items:"عهدة",contacts:"رقم",guests:"ضيف",loans:"سلفة",closings:"قفل شهر",prices:"سعر",jar:"حصالة"};
+const COL_AR={import:"بيانات",expenses:"مصروف",payments:"دفعة",fund:"اشتراك صندوق",roster:"ساكن",users:"حساب",house:"إعدادات السكن",shopping:"مشتريات",chores:"مهمة",notes:"إعلان",polls:"تصويت",meters:"قراية عداد",items:"عهدة",contacts:"رقم",guests:"ضيف",loans:"سلفة",closings:"قفل شهر",prices:"سعر",jar:"حصالة",bookings:"حجز"};
 const ACT_AR={create:"أضاف",update:"عدّل",delete:"حذف"};
 const FIELD_AR={price:"السعر",shop:"المحل",unit:"الوحدة",jarCfg:"الحصالة",title:"البند",amount:"المبلغ",date:"التاريخ",category:"الفئة",paidBy:"دفعه",split:"التقسيم",note:"ملاحظة",from:"من",to:"إلى",status:"الحالة",method:"الطريقة",name:"الاسم",weight:"الوزن",active:"ساكن",role:"الدور",memberId:"مربوط بـ",deposit:"التأمين",item:"الحاجة",qty:"الكمية",bought:"اتشرى",text:"النص",pinned:"مثبّت",reading:"القراية",type:"النوع",hostId:"المستضيف",factor:"الحصة",lockedMonths:"الشهور المقفولة",recurring:"الفواتير الثابتة",categories:"أنواع المصاريف",budgets:"الميزانية",guestCats:"أنواع الضيوف",recSkip:"فواتير متشالة",meterPrices:"أسعار العدادات",fundCfg:"الصندوق",currency:"العملة",rulesText:"قوانين السكن",depositHolder:"ماسك التأمين",noGuests:"من غير ضيوف",room:"الأوضة",lastDone:"آخر مرة",closed:"مقفول"};
 function fmtVal(k,v){ if(v==null||v==="") return "—"; if(["paidBy","from","to","memberId","hostId","addedBy","boughtBy"].includes(k)) return mName(v); if(k==="amount"||k==="deposit") return money(v);
@@ -970,7 +1019,7 @@ function inviteModal(){
 }
 function quickSheet(){
   const opts=[["qaSheet","sparkle","اكتب جملة",F("quickAdd")&&canAddExp()],["addExp","receipt","مصروف",canAddExp()],["addPay","swap","دفعة",F("payments")&&canAddExp()],["addFund","piggy","اشتراك صندوق",F("fund")&&canWrite()&&(isAdmin()||PM("memberFund"))&&myMember()],
-    ["addPrice","tag","سعر حاجة",F("prices")&&canWrite()],["addJar","piggy","حط في الحصالة",F("rentJar")&&canWrite()&&!!myMember()&&+(jarCfg().amount)>0],["quickShop","cart","حاجة ناقصة",F("shopping")&&canWrite()&&(isAdmin()||PM("memberShopping"))],["addMeter","bolt","قراية عداد",F("meters")&&canWrite()&&(isAdmin()||PM("memberMeters"))],["addPoll","poll","تصويت",F("polls")&&canWrite()&&(isAdmin()||PM("memberPolls"))]].filter(o=>o[3]);
+    ["addBook","washer","احجز",F("booking")&&canWrite()&&!!myMember()],["addPrice","tag","سعر حاجة",F("prices")&&canWrite()],["addJar","piggy","حط في الحصالة",F("rentJar")&&canWrite()&&!!myMember()&&+(jarCfg().amount)>0],["quickShop","cart","حاجة ناقصة",F("shopping")&&canWrite()&&(isAdmin()||PM("memberShopping"))],["addMeter","bolt","قراية عداد",F("meters")&&canWrite()&&(isAdmin()||PM("memberMeters"))],["addPoll","poll","تصويت",F("polls")&&canWrite()&&(isAdmin()||PM("memberPolls"))]].filter(o=>o[3]);
   modal(`<h3>إضافة سريعة<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="sheet-grid">${opts.map(([a,ic,l])=>`<button data-qa="${a}"><span class="ic-round acc">${icon(ic)}</span>${l}</button>`).join("")}</div>`,ov=>{
     ov.querySelector(".sheet-grid").onclick=e=>{ const b=e.target.closest("[data-qa]"); if(!b) return; closeModal(); handle(b.dataset.qa,b); }; });
 }
@@ -1046,6 +1095,16 @@ function handle(a,b={dataset:{}}){
     case "logout": return signOut(auth);
     case "quick": return quickSheet();
     case "more": return moreSheet();
+    case "addBook": return myMember()?bookModal():toast("اختار اسمك الأول");
+    case "bookNow": { const r=resList().find(x=>x.id===S.bk.res)||resList()[0]; const b={res:r.id,date:today(),start:nowHM()}; b.end=C.fromMin(Math.min(24*60-1,C.toMin(b.start)+(+r.slot||60)));
+      const clash=S.bookings.find(x=>C.overlaps(x,b)); if(clash) return toast(`محجوز لـ ${mName(clash.memberId)} الساعة ${C.fmt12(clash.start)} — احجز وقت أقصر`);
+      return run(()=>addDoc(HC("bookings"),{...b,note:"",memberId:myMember(),createdBy:S.user.uid,createdAt:iso()}),`${r.name} معاك لحد ${C.fmt12(b.end)}`); }
+    case "delBook": return confirmBox("تلغي الحجز ده؟","الغيه",()=>run(()=>deleteDoc(H("bookings",id)),"اتلغى"));
+    case "bkRes": S.bk.res=id; return render();
+    case "bkDay": S.bk.day=+b.dataset.i||0; return render();
+    case "resCfg": { const rs=resList(); return simpleModal("الحاجات اللي بتتحجز",[{id:"list",label:"كل سطر: الاسم، المدة الافتراضية بالدقايق",type:"textarea",rows:5,full:true,value:rs.map(r=>`${r.name}، ${r.slot}`).join("\n")}],async v=>{
+      const out=v.list.split("\n").map(l=>l.trim()).filter(Boolean).map((l,i)=>{ const [n,m]=l.split(/[،,]/).map(x=>x.trim()); const old=rs.find(r=>r.name===n); return {id:old?.id||("r"+Date.now().toString(36)+i),name:n.slice(0,30),slot:Math.min(600,Math.max(5,+C.norm(m||"")||60))}; }).slice(0,8);
+      if(!out.length){ toast("اكتب حاجة واحدة على الأقل"); return false; } await updateDoc(doc(db,"houses",S.hid),{resources:out}); toast("اتحفظ"); }); }
     case "addPrice": return priceModal(b.dataset?.item?{item:b.dataset.item}:{});
     case "priceHist": return priceHist(b.dataset.k);
     case "delPrice": return confirmBox("حذف السعر ده؟","احذف",()=>run(()=>deleteDoc(H("prices",id)),"اتحذف"));

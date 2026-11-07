@@ -170,6 +170,13 @@ service cloud.firestore {
         allow delete: if isAdmin(h) || (isWriter(h) && mine());
       }
 
+      // حجز الغسالة والحمام
+      match /bookings/{id} {
+        allow read: if isMember(h);
+        allow create: if isWriter(h) && stamped() && (isAdmin(h) || request.resource.data.memberId == myMember(h));
+        allow delete: if isAdmin(h) || (isWriter(h) && mine());
+      }
+
       // سجل التعديلات: إضافة بس — محدش يعدّل أو يمسح
       match /audit/{id} {
         allow read: if isMember(h);

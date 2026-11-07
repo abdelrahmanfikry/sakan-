@@ -31,6 +31,7 @@ export const FEATURES = [
   ["prices","ذاكرة الأسعار","سعر كل حاجة بتشتروها، وتنبيه لو غليت، وأرخص محل"],
   ["rentJar","حصالة الإيجار","كل واحد يحوّش نصيبه من الإيجار بمبلغ صغير كل يوم"],
   ["weekly","تقرير الأسبوع","ملخص الأسبوع بالهزار جاهز يتبعت على الجروب"],
+  ["booking","حجز الغسالة والحمام","مواعيد بالدور للغسالة والحمام أو أي حاجة مشتركة"],
 ];
 export const OFF_BY_DEFAULT = ["fund","meters","deposits","contacts","polls","board","chores"];
 export const DEFAULT_FEATURES = Object.fromEntries(FEATURES.map(([k]) => [k, !OFF_BY_DEFAULT.includes(k)]));
@@ -106,6 +107,7 @@ const P = {
   file: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
   tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
+  washer: '<rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="12" cy="13" r="4.5"/><path d="M7 6.5h2"/>',
   sparkle: '<path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   google: '',
 };
@@ -270,3 +272,10 @@ export function weekRange(offset = 0, t = today()) {
   const start = new Date(end); start.setUTCDate(start.getUTCDate() - 6);
   return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
 }
+
+/* ---------- الحجوزات ---------- */
+export const DEFAULT_RES = [{ id: "washer", name: "الغسالة", slot: 120 }, { id: "bath", name: "الحمام", slot: 20 }];
+export const toMin = t => { const [h, m] = String(t || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+export const fromMin = n => { n = Math.max(0, Math.min(24 * 60, Math.round(n))); return String(Math.floor(n / 60) % 24).padStart(2, "0") + ":" + String(n % 60).padStart(2, "0"); };
+export const fmt12 = t => { const n = toMin(t); let h = Math.floor(n / 60) % 24; const m = n % 60; const pm = h >= 12; h = h % 12 || 12; return `${h}:${String(m).padStart(2, "0")} ${pm ? "م" : "ص"}`; };
+export const overlaps = (a, b) => a.res === b.res && a.date === b.date && toMin(a.start) < toMin(b.end) && toMin(b.start) < toMin(a.end);
