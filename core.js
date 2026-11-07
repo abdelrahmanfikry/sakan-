@@ -29,7 +29,8 @@ export const FEATURES = [
   ["autoRecurring","إضافة الفواتير الثابتة تلقائيًا","تتسجّل لوحدها يوم استحقاقها لما مدير يفتح الموقع"],
   ["quickAdd","الإضافة بجملة","تكتب «أحمد دفع 300 أكل على الكل» والمصروف يتملي لوحده"],
 ];
-export const DEFAULT_FEATURES = Object.fromEntries(FEATURES.map(([k]) => [k, k !== "fund"]));
+export const OFF_BY_DEFAULT = ["fund","meters","deposits","contacts","polls","board","chores"];
+export const DEFAULT_FEATURES = Object.fromEntries(FEATURES.map(([k]) => [k, !OFF_BY_DEFAULT.includes(k)]));
 
 export const PERMS = [
   ["expOthers", false, "العضو يسجّل مصروف باسم غيره", "لو مقفولة، العضو يسجّل اللي دفعه هو بس"],

@@ -249,18 +249,19 @@ const emptyBox=(ic,t,s)=>`<div class="empty"><div class="ic-round acc">${icon(ic
 function monthOptions(sel){ const ms=new Set([monthOf(today()),...S.expenses.map(e=>monthOf(e.date)),...S.payments.map(p=>monthOf(p.date))].filter(Boolean));
   return `<option value="">كل الشهور</option>`+[...ms].sort().reverse().map(m=>`<option value="${m}" ${m===sel?"selected":""}>${esc(monthName(m))}${locked(m+"-01")?" (مقفول)":""}</option>`).join(""); }
 function settleCard(p){
-  const mine=myMember(), info=payInfo(p.to), payer=mine===p.from, recv=mine===p.to;
-  const canRec=canWrite() && (isAdmin()||payer||recv) && F("payments");
-  const msg=`يا ${mName(p.from)}، عليك ${money(p.amount)} لـ ${mName(p.to)} من حسابات ${S.house?.name||"السكن"}.`+(F("instapay")&&info.instapay?`\nادفع على إنستاباي: ${info.instapay}`:"")+(F("instapay")&&info.ipa?`\nعنوان إنستاباي: ${info.ipa}`:"")+(F("instapay")&&info.wallet?`\nمحفظة: ${info.wallet}`:"");
+  const mine=myMember(), info=payInfo(p.to), from=payInfo(p.from), payer=mine===p.from, recv=mine===p.to;
+  const canRec=canWrite() && (isAdmin()||payer||recv) && F("payments"); const ip=F("instapay");
+  const msg=`يا ${mName(p.from)}، عليك ${money(p.amount)} لـ ${mName(p.to)} من حسابات ${S.house?.name||"السكن"}.`+(ip&&info.instapay?`\nادفع على إنستاباي: ${info.instapay}`:"")+(ip&&info.ipa?`\nعنوان إنستاباي: ${info.ipa}`:"")+(ip&&info.wallet?`\nمحفظة: ${info.wallet}`:"");
+  const payBtn = ip&&info.instapay ? `<a class="btn insta" href="${esc(info.instapay)}" target="_blank" rel="noopener noreferrer" data-payamt="${r2(p.amount)}">${icon("wallet")} ادفع ${money(p.amount)}</a>`
+    : ip&&(info.ipa||info.wallet) ? `<button class="btn insta" data-act="payManual" data-to="${p.to}" data-amt="${r2(p.amount)}">${icon("wallet")} ادفع ${money(p.amount)}</button>` : "";
+  const collectBtn = ip&&recv&&(from.phone||from.ipa) ? `<button class="btn sm insta" data-act="collect" data-from="${p.from}" data-amt="${r2(p.amount)}">${icon("wallet")} اطلبها على إنستاباي</button>` : "";
   return `<div class="scard"><div class="top"><b>${esc(mName(p.from))}</b>${payer?'<span class="chip acc">انت</span>':""}<span class="arrow">←</span><b>${esc(mName(p.to))}</b>${recv?'<span class="chip acc">انت</span>':""}<span class="amt">${money(p.amount)}</span></div>
    <div class="actions">
-    ${F("instapay")&&info.instapay?`<a class="btn sm insta" href="${esc(info.instapay)}" target="_blank" rel="noopener noreferrer">${icon("wallet")} ادفع بإنستاباي</a>`:""}
-    ${F("instapay")&&info.ipa?`<button class="btn sm" data-copy="${esc(info.ipa)}" data-msg="اتنسخ عنوان إنستاباي">${icon("copy")} ${esc(info.ipa)}</button>`:""}
-    ${F("instapay")&&info.wallet?`<button class="btn sm" data-copy="${esc(info.wallet)}" data-msg="اتنسخ رقم المحفظة">${icon("copy")} محفظة</button>`:""}
-    <button class="btn sm" data-copy="${r2(p.amount)}" data-msg="اتنسخ المبلغ">${icon("copy")} المبلغ</button>
+    ${payer||isAdmin()?payBtn:""}
     ${canRec?`<button class="btn sm primary" data-act="quickpay" data-from="${p.from}" data-to="${p.to}" data-amt="${p.amount}">${icon("check")} ${payer?"دفعت":"اتدفعت"}</button>`:""}
-    ${F("whatsapp")?`<a class="btn sm" href="https://wa.me/${waPhone(payInfo(p.from).phone)}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener noreferrer">${icon("wa")} ذكّره</a>`:""}
-   </div>${F("instapay")&&!info.instapay&&!info.ipa&&!info.wallet?`<div class="tiny">${esc(mName(p.to))} لسه ما حطّش بيانات الدفع.</div>`:""}</div>`;
+    ${collectBtn}
+    ${F("whatsapp")&&!payer?`<a class="btn sm" href="https://wa.me/${waPhone(from.phone)}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener noreferrer">${icon("wa")} ذكّره</a>`:""}
+   </div>${ip&&payer&&!info.instapay&&!info.ipa&&!info.wallet?`<div class="tiny">${esc(mName(p.to))} لسه ما حطّش بيانات الدفع.</div>`:""}</div>`;
 }
 const splitLabel=e=>{ const sp=e.split||{}; if(sp.mode==="custom") return "مبالغ مخصّصة"; const n=(sp.members||[]).length; return sp.mode==="weight"?`بالأوزان على ${n}`:(n===active().length?"بالتساوي على الكل":`بالتساوي على ${n}`); };
 function expRows(list,compact){
@@ -293,18 +294,11 @@ function home(head){
   const heroLbl = mine ? (myNet>0.009?"ليك عند السكن":myNet<-0.009?"عليك للسكن":"حسابك متصفّي") : `مصاريف ${monthName(m)}`;
   return `${linkBanner()}
   <section class="hero"><div class="l">${heroLbl}</div><div class="big num">${money(heroVal)}</div>
-    <div class="row"><span class="pill">مصاريف الشهر ${money(totM)}</span><span class="pill">${plan.length} تحويل مطلوب</span>${fundBal!==null?`<span class="pill">الصندوق ${money(fundBal)}</span>`:""}${openPolls?`<span class="pill">${openPolls} تصويت مستني صوتك</span>`:""}</div>
-    <div class="row">${canAddExp()?`<button class="btn" data-act="addExp">${icon("plus")} مصروف</button>`:""}${F("summary")?`<button class="btn ghost" data-act="summary">${icon("share")} ملخص الشهر</button>`:""}${mine&&F("statement")?`<button class="btn ghost" data-act="statement" data-id="${mine}">${icon("receipt")} كشف حسابي</button>`:""}</div></section>
-  ${quickAddBox()}
+    <div class="row"><span class="pill">مصاريف ${esc(monthName(m))} ${money(totM)}</span>${fundBal!==null?`<span class="pill">الصندوق ${money(fundBal)}</span>`:""}${openPolls?`<span class="pill">${openPolls} تصويت مستني صوتك</span>`:""}</div>
+    <div class="row">${canAddExp()?`<button class="btn" data-act="addExp">${icon("plus")} مصروف</button>`:""}${mine&&F("statement")?`<button class="btn ghost" data-act="statement" data-id="${mine}">${icon("receipt")} كشف حسابي</button>`:""}</div></section>
   ${alerts.length?`<section class="card"><div class="card-head"><h2 class="h">محتاج انتباهك</h2><span class="chip neg">${alerts.length}</span></div><div class="list">${alerts.join("")}</div></section>`:""}
-  ${myPlan.length&&F("payments")?`<section class="card"><div class="card-head"><h2 class="h">تحويلاتك</h2></div><div class="settle">${myPlan.map(settleCard).join("")}</div></section>`:""}
-  <div class="grid">
-   ${(PM("seeAll")||isAdmin())?`<section class="card"><div class="card-head"><h2 class="h">مين ليه ومين عليه</h2><span class="tiny">اضغط الاسم لكشف الحساب</span></div>${balBars(bAll)}</section>`:""}
-   ${F("payments")&&(PM("seeAll")||isAdmin())?`<section class="card"><div class="card-head"><h2 class="h">${mine?"باقي التحويلات":"أقل عدد تحويلات للتصفية"}</h2></div><div class="settle">${others.length?others.map(settleCard).join(""):emptyBox("check",plan.length?"مفيش تحويلات تانية":"الحسابات متصفّية")}</div></section>`:""}
-  </div>
-  ${turns.length||pinned.length?`<div class="grid">
-   ${turns.length?`<section class="card"><div class="card-head"><h2 class="h">${mine?"دورك":"مين دوره"}</h2><button class="btn sm ghost" data-go="chores">الكل</button></div><div class="list">${turns.map(({c,t})=>`<div class="row-item"><div class="ic-round acc">${icon("broom")}</div><div class="grow"><b>${esc(c.title)}</b><div class="tiny">دور ${esc(mName(t.who))} · فاضل ${t.daysLeft} يوم</div></div></div>`).join("")}</div></section>`:""}
-   ${pinned.length?`<section class="card"><div class="card-head"><h2 class="h">مثبّت</h2><button class="btn sm ghost" data-go="board">الكل</button></div><div class="list">${pinned.map(n=>`<div class="row-item pinned"><div class="grow note-text">${esc(n.text)}</div></div>`).join("")}</div></section>`:""}</div>`:""}
+  ${F("payments")?`<section class="card"><div class="card-head"><h2 class="h">تحويلاتك</h2><button class="btn sm ghost" data-go="payments">كل التسويات</button></div>${myPlan.length?`<div class="settle">${myPlan.map(settleCard).join("")}</div>`:emptyBox("check",mine?"مفيش عليك ولا ليك تحويلات":"اختار اسمك علشان تشوف تحويلاتك")}</section>`:""}
+  ${turns.length?`<section class="card"><div class="card-head"><h2 class="h">دورك</h2><button class="btn sm ghost" data-go="chores">الكل</button></div><div class="list">${turns.map(({c,t})=>`<div class="row-item"><div class="ic-round acc">${icon("broom")}</div><div class="grow"><b>${esc(c.title)}</b><div class="tiny">فاضل ${t.daysLeft} يوم</div></div></div>`).join("")}</div></section>`:""}
   <section class="card"><div class="card-head"><h2 class="h">آخر المصاريف</h2><button class="btn sm ghost" data-go="expenses">الكل</button></div>${expRows([...S.expenses].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).slice(0,5),true)}</section>`;
 }
 function balBars(b){
@@ -336,7 +330,8 @@ function payments(head){
   const visible=p=>PM("seeAll")||isAdmin()||p.from===mine||p.to===mine;
   const list=S.payments.filter(p=>(!S.f.month||monthOf(p.date)===S.f.month)&&visible(p)).sort((a,b)=>(b.date||"").localeCompare(a.date||"")||(b.createdAt||"").localeCompare(a.createdAt||""));
   return head("التسويات",PM("payConfirm")?"الدفعة اللي يسجّلها الدافع بتستنى تأكيد المستلم":"",canAddExp()?`<button class="btn primary" data-act="addPay">${icon("plus")} دفعة</button>`:"")+linkBanner()+
-  `<section class="card"><div class="card-head"><h2 class="h">المطلوب دلوقتي</h2></div><div class="settle">${plan.filter(visible).length?plan.filter(visible).map(settleCard).join(""):emptyBox("check","مفيش تحويلات مطلوبة")}</div></section>
+  `${PM("seeAll")||isAdmin()?`<section class="card"><div class="card-head"><h2 class="h">مين ليه ومين عليه</h2><span class="tiny">اضغط الاسم لكشف الحساب</span></div>${balBars(C.balances(data(),""))}</section>`:""}
+  <section class="card"><div class="card-head"><h2 class="h">المطلوب دلوقتي</h2></div><div class="settle">${plan.filter(visible).length?plan.filter(visible).map(settleCard).join(""):emptyBox("check","مفيش تحويلات مطلوبة")}</div></section>
   <section class="card"><div class="card-head"><h2 class="h">سجل الدفعات</h2><select id="fMonth" style="max-width:200px">${monthOptions(S.f.month)}</select></div>
   ${list.length?`<div class="list">${list.map(p=>{ const canConf=!C.confirmed(p)&&(isAdmin()||p.to===mine);
     return `<div class="row-item"><div class="ic-round ${C.confirmed(p)?"pos":"neg"}">${icon(C.confirmed(p)?"check":"clock")}</div><div class="grow"><b>${esc(mName(p.from))} ← ${esc(mName(p.to))}</b><div class="tiny">${esc(p.date)} · ${esc(p.method||"")} · ${C.confirmed(p)?"مؤكدة":"مستنية تأكيد"}${p.note?" · "+esc(p.note):""}</div></div>
@@ -484,7 +479,7 @@ function settings(head){
     <label class="f">العملة<select id="sCur">${["ج.م","ر.س","د.إ","د.ك","$","€"].map(c=>`<option ${c===cur()?"selected":""}>${c}</option>`).join("")}</select></label>
     <div class="full"><button class="btn primary" data-act="saveHouse">حفظ</button></div></div></section>
   <div class="grid">
-   <section class="card"><div class="card-head"><h2 class="h">المزايا</h2><span class="tiny">شغّل أو اقفل أي ميزة</span></div><div class="toggle-list">${C.FEATURES.map(([k,t,s])=>sw("data-feat",k,f[k]!==false,t,s)).join("")}</div></section>
+   <section class="card"><div class="card-head"><h2 class="h">المزايا</h2><div class="actions"><button class="btn sm" data-act="simpleMode">الوضع البسيط</button><button class="btn sm" data-act="fullMode">كل المزايا</button></div></div><div class="toggle-list">${C.FEATURES.map(([k,t,s])=>sw("data-feat",k,f[k]!==false,t,s)).join("")}</div></section>
    <section class="card"><div class="card-head"><h2 class="h">صلاحيات الأعضاء</h2><span class="tiny">المدير دايمًا يقدر يعمل كل حاجة</span></div><div class="toggle-list">${C.PERMS.map(([k,,t,s])=>sw("data-perm",k,!!p[k],t,s)).join("")}</div>
     <p class="tiny" style="margin:12px 0 0">الأدوار: <b>مدير</b> يتحكم في كل حاجة · <b>عضو</b> حسب الصلاحيات دي · <b>مشاهد</b> يتفرّج بس. تغيّر دور أي حد من «الأعضاء».</p></section>
   </div>
@@ -844,7 +839,7 @@ function inviteModal(){
    <div class="mfoot"><button class="btn primary" data-copy="${esc(link)}" data-msg="اتنسخ اللينك">${icon("copy")} انسخ اللينك</button><a class="btn" href="https://wa.me/?text=${encodeURIComponent(`انضم لحسابات ${S.house.name} على سكن: ${link}`)}" target="_blank" rel="noopener noreferrer">${icon("wa")} ابعت واتساب</a><button class="btn" data-close>تمام</button></div>`);
 }
 function quickSheet(){
-  const opts=[["addExp","receipt","مصروف",canAddExp()],["addPay","swap","دفعة",F("payments")&&canAddExp()],["addFund","piggy","اشتراك صندوق",F("fund")&&canWrite()&&(isAdmin()||PM("memberFund"))&&myMember()],
+  const opts=[["qaSheet","sparkle","اكتب جملة",F("quickAdd")&&canAddExp()],["addExp","receipt","مصروف",canAddExp()],["addPay","swap","دفعة",F("payments")&&canAddExp()],["addFund","piggy","اشتراك صندوق",F("fund")&&canWrite()&&(isAdmin()||PM("memberFund"))&&myMember()],
     ["quickShop","cart","حاجة ناقصة",F("shopping")&&canWrite()&&(isAdmin()||PM("memberShopping"))],["addMeter","bolt","قراية عداد",F("meters")&&canWrite()&&(isAdmin()||PM("memberMeters"))],["addPoll","poll","تصويت",F("polls")&&canWrite()&&(isAdmin()||PM("memberPolls"))]].filter(o=>o[3]);
   modal(`<h3>إضافة سريعة<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="sheet-grid">${opts.map(([a,ic,l])=>`<button data-qa="${a}"><span class="ic-round acc">${icon(ic)}</span>${l}</button>`).join("")}</div>`,ov=>{
     ov.querySelector(".sheet-grid").onclick=e=>{ const b=e.target.closest("[data-qa]"); if(!b) return; closeModal(); handle(b.dataset.qa,b); }; });
@@ -888,6 +883,7 @@ function bindView(){
 async function upHouse(patch,msg){ try{ await updateDoc(doc(db,"houses",S.hid),patch); msg&&toast(msg); }catch(e){ fail(e); } }
 document.addEventListener("focusout",()=>{ setTimeout(()=>{ if(S.dirty && !document.querySelector("#modalRoot .overlay")){ const ae=document.activeElement; if(!(ae&&ae.closest&&ae.closest("#content")&&/INPUT|TEXTAREA/.test(ae.tagName)&&ae.value)){ S.dirty=false; render(); } } },50); });
 root.addEventListener("click",e=>{
+  const pl=e.target.closest("[data-payamt]"); if(pl){ const a=pl.dataset.payamt; try{ navigator.clipboard.writeText(a).then(()=>toast(`اتنسخ المبلغ ${a} — الصقه في إنستاباي`)).catch(()=>toast(`اكتب المبلغ ${a} في إنستاباي`)); }catch(_){ toast(`اكتب المبلغ ${a} في إنستاباي`); } return; }
   const cp=e.target.closest("[data-copy]"); if(cp) return copy(cp.dataset.copy,cp.dataset.msg);
   const g=e.target.closest("[data-go]"); if(g) return go(g.dataset.go);
   const b=e.target.closest("[data-act]"); if(b) handle(b.dataset.act,b);
@@ -897,6 +893,20 @@ function handle(a,b={dataset:{}}){
   const id=b.dataset?.id; const E=S.expenses.find(x=>x.id===id), P=S.payments.find(x=>x.id===id), M=S.roster.find(x=>x.id===id);
   switch(a){
     case "theme": return toggleTheme();
+    case "payManual": { const pi=payInfo(b.dataset.to), a=b.dataset.amt; const id2=pi.ipa||pi.wallet;
+      return modal(`<h3>ادفع ${money(a)} لـ ${esc(mName(b.dataset.to))}<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="list">
+        <div class="row-item"><div class="ic-round ins">1</div><div class="grow"><b>انسخ ${pi.ipa?"عنوان إنستاباي":"رقم المحفظة"}</b><div class="tiny"><code>${esc(id2)}</code></div></div><button class="btn sm" data-copy="${esc(id2)}">${icon("copy")} نسخ</button></div>
+        <div class="row-item"><div class="ic-round ins">2</div><div class="grow"><b>انسخ المبلغ</b><div class="tiny"><code>${r2(a)}</code></div></div><button class="btn sm" data-copy="${r2(a)}">${icon("copy")} نسخ</button></div>
+        <div class="row-item"><div class="ic-round ins">3</div><div class="grow"><b>افتح إنستاباي ← «إرسال أموال» والصقهم</b><div class="tiny">وبعد ما تحوّل ارجع هنا ودوس «دفعت»</div></div></div></div>
+        <div class="mfoot"><button class="btn" data-close>تمام</button></div>`); }
+    case "collect": { const f=payInfo(b.dataset.from), a=b.dataset.amt; const num=f.phone||f.ipa;
+      return modal(`<h3>اطلب ${money(a)} من ${esc(mName(b.dataset.from))}<button class="btn icon ghost" data-close>${icon("x")}</button></h3><p class="sub" style="margin:0 0 12px">من أبلكيشن إنستاباي بتبعت طلب بالمبلغ، فيوصله إشعار ويدوس «موافقة» بس.</p><div class="list">
+        <div class="row-item"><div class="ic-round ins">1</div><div class="grow"><b>افتح إنستاباي ← «طلب أموال» (Collect Money)</b></div></div>
+        <div class="row-item"><div class="ic-round ins">2</div><div class="grow"><b>رقمه أو عنوانه</b><div class="tiny"><code>${esc(num)}</code></div></div><button class="btn sm" data-copy="${esc(num)}">${icon("copy")} نسخ</button></div>
+        <div class="row-item"><div class="ic-round ins">3</div><div class="grow"><b>المبلغ</b><div class="tiny"><code>${r2(a)}</code></div></div><button class="btn sm" data-copy="${r2(a)}">${icon("copy")} نسخ</button></div>
+        <div class="row-item"><div class="ic-round ins">4</div><div class="grow"><b>ابعت الطلب، ولما يوافق دوس «اتدفعت» هنا</b></div></div></div>
+        <div class="mfoot"><button class="btn" data-close>تمام</button></div>`); }
+    case "simpleMode": case "fullMode": { const on=a==="fullMode"; const keys=["fund","meters","deposits","contacts","polls","board","chores"]; const patch={}; keys.forEach(k=>patch["features."+k]=on); return upHouse(patch,on?"اتفتحت كل المزايا":"بقى الوضع البسيط"); }
     case "addCat": { const v=document.getElementById("newCat")?.value.trim(); if(!v) return toast("اكتب اسم النوع"); if(cats().includes(v)) return toast("النوع موجود"); return upHouse({categories:[...cats(),v]},"اتضاف النوع"); }
     case "delCat": { const c=[...cats()]; c.splice(+b.dataset.i,1); return upHouse({categories:c},"اتشال النوع"); }
     case "restore": { const a=S.audit.find(x=>x.id===id); if(!a||!a.before) return; return confirmBox("ترجّع البند ده؟","رجّعه",()=>run(()=>setDoc(H(a.col,a.refId),a.before),"اترجّع"),"هيرجع زي ما كان قبل الحذف."); }
@@ -972,6 +982,7 @@ function handle(a,b={dataset:{}}){
     case "addContact": return simpleModal("رقم مهم",[{id:"name",label:"الاسم",full:true},{id:"role",label:"الصفة",ph:"صاحب الشقة"},{id:"phone",label:"الرقم",dir:"ltr"}],async v=>{ if(!v.name||!v.phone){ toast("الاسم والرقم مطلوبين"); return false; } await addDoc(HC("contacts"),{...v,createdAt:iso()}); toast("اتضاف"); });
     case "delContact": return run(()=>deleteDoc(H("contacts",id)),"اتحذف");
     case "editRules": return simpleModal("قوانين السكن",[{id:"t",label:"",type:"textarea",full:true,rows:10,value:S.house.rulesText||"",max:5000}],async v=>{ await updateDoc(doc(db,"houses",S.hid),{rulesText:v.t}); toast("اتحفظت"); });
+    case "qaSheet": return modal(`<h3>${icon("sparkle")} إضافة بجملة<button class="btn icon ghost" data-close>${icon("x")}</button></h3><p class="sub" style="margin:0 0 10px">مثال: محفوظ دفع 300 غدا على علاء وانا</p><input id="qaText" placeholder="مين دفع كام على إيه وعلى مين…" maxlength="160"><div class="mfoot"><button class="btn primary" id="qaGo">كمّل</button><button class="btn" data-close>إلغاء</button></div>`,ov=>{ const go2=()=>{ const t=ov.querySelector("#qaText").value; closeModal(); const tmp=document.createElement("input"); tmp.id="qaText"; tmp.value=t; tmp.hidden=true; document.body.appendChild(tmp); handle("quickParse"); tmp.remove(); }; ov.querySelector("#qaGo").onclick=go2; ov.querySelector("#qaText").onkeydown=e=>{ if(e.key==="Enter") go2(); }; });
     case "quickParse": { const t=document.getElementById("qaText")?.value.trim(); if(!t) return toast("اكتب الجملة الأول"); const r=C.parseQuick(t,S.roster,myMember()); const tk=C.norm(t).split(/\s+/).map(x=>x.replace(/ء$/,"")); const direct=cats().find(c=>tk.includes(C.norm(c).replace(/ء$/,""))||tk.includes(C.norm(c).replace(/^ال/,""))); r.category=direct||mapCat(r.category); if(!r.paidBy) setTimeout(()=>toast("اتأكد من «مين دفع» — الاسم مش واضح"),900); if(!r.amount) return toast("ما لقيتش المبلغ — اكتب رقم في الجملة");
       if(r.hint) setTimeout(()=>toast(r.hint),500); return expModal(null,{title:r.title,amount:r.amount,category:r.category,paidBy:r.paidBy||myMember()||active()[0]?.id,split:{mode:"equal",members:r.members}}); }
     case "addGuest": case "editGuest": { const g=S.guests.find(x=>x.id===id)||{}; const hosts=isAdmin()?active():active().filter(x=>x.id===myMember()); if(!hosts.length) return toast("اختار اسمك الأول من «الأعضاء»");
