@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, addDoc as fbAdd, setDoc as fbSet, updateDoc as fbUpd, deleteDoc as fbDel, getDoc, writeBatch, deleteField, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
-import * as C from "./core.js";
+import * as C from "./core.js?v=5";
 const { esc, r2, today, monthOf, monthName, iso, fmtDT, safeUrl, waPhone, icon, FUND } = C;
 
 const root = document.getElementById("root");
