@@ -28,6 +28,9 @@ export const FEATURES = [
   ["audit","سجل التعديلات","كل إضافة وتعديل وحذف ومين عمله"],
   ["autoRecurring","إضافة الفواتير الثابتة تلقائيًا","تتسجّل لوحدها يوم استحقاقها لما مدير يفتح الموقع"],
   ["quickAdd","الإضافة بجملة","تكتب «أحمد دفع 300 أكل على الكل» والمصروف يتملي لوحده"],
+  ["prices","ذاكرة الأسعار","سعر كل حاجة بتشتروها، وتنبيه لو غليت، وأرخص محل"],
+  ["rentJar","حصالة الإيجار","كل واحد يحوّش نصيبه من الإيجار بمبلغ صغير كل يوم"],
+  ["weekly","تقرير الأسبوع","ملخص الأسبوع بالهزار جاهز يتبعت على الجروب"],
 ];
 export const OFF_BY_DEFAULT = ["fund","meters","deposits","contacts","polls","board","chores"];
 export const DEFAULT_FEATURES = Object.fromEntries(FEATURES.map(([k]) => [k, !OFF_BY_DEFAULT.includes(k)]));
@@ -102,6 +105,7 @@ const P = {
   guest: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M19 8v6M16 11h6"/>',
   file: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/>',
+  tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
   sparkle: '<path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   google: '',
 };
@@ -221,4 +225,48 @@ export function parseQuick(text, roster, myId) {
   outer: for (const [c, ws] of Object.entries(CAT_WORDS)) for (const t of head) { const b = t.replace(/^و?ال/, ""); if (ws.includes(t) || ws.includes(b)) { category = c; break outer; } }
   const title = rawToks.slice(0, ai).filter((rt, i) => { const t = head[i]; return !STOP.has(t) && !/^\d+([.,]\d+)?$/.test(t) && !tokIds[clean(t)]; }).join(" ").trim();
   return { amount, paidBy, members, category, title: title || (category === "أخرى" ? "مصروف" : category), hint };
+}
+
+/* ---------- ذاكرة الأسعار ---------- */
+export const itemKey = s => norm(String(s || "")).replace(/\s+/g, " ").trim();
+export function priceGroups(prices) {
+  const g = {};
+  prices.forEach(p => { const k = itemKey(p.item); if (!k) return; (g[k] = g[k] || { key: k, name: p.item, list: [] }).list.push(p); });
+  return Object.values(g).map(x => {
+    const l = x.list.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
+    const last = l[0], prev = l.find((p, i) => i > 0 && (p.shop || "") === (last.shop || "")) || l[1] || null;
+    const change = prev && +prev.price > 0 ? r2((last.price - prev.price) / prev.price * 100) : 0;
+    const shops = {}; l.forEach(p => { const sh = (p.shop || "").trim() || "—"; if (!shops[sh]) shops[sh] = p; });
+    const cheap = Object.values(shops).sort((a, b) => a.price - b.price)[0];
+    return { ...x, name: last.item, list: l, last, prev, change, cheap, shops: Object.keys(shops).length };
+  }).sort((a, b) => (b.last.date || "").localeCompare(a.last.date || ""));
+}
+
+/* ---------- حصالة الإيجار ---------- */
+const addMonths = (d, n) => { const x = new Date(d + "T00:00:00Z"); const day = x.getUTCDate(); x.setUTCDate(1); x.setUTCMonth(x.getUTCMonth() + n); x.setUTCDate(Math.min(day, 28)); return x.toISOString().slice(0, 10); };
+export const daysBetween = (a, b) => Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 864e5);
+export function jarCycle(dueDay, t = today()) {
+  const d = Math.min(28, Math.max(1, +dueDay || 1)); const thisDue = t.slice(0, 8) + String(d).padStart(2, "0");
+  const next = t <= thisDue ? thisDue : addMonths(thisDue, 1); const prev = addMonths(next, -1);
+  return { prev, next, daysLeft: Math.max(1, daysBetween(t, next) + 1), total: daysBetween(prev, next) };
+}
+export function jarStatus(cfg, roster, jar, t = today()) {
+  const act = roster.filter(m => m.active !== false && (!cfg.members || cfg.members.includes(m.id))); const amount = +cfg.amount || 0;
+  const W = act.reduce((a, m) => a + (+m.weight || 1), 0) || 1; const cy = jarCycle(cfg.dueDay, t);
+  const rows = act.map(m => {
+    const share = r2(amount * (+m.weight || 1) / W);
+    const mine = jar.filter(j => j.memberId === m.id && j.date > cy.prev && j.date <= cy.next);
+    const saved = r2(mine.reduce((a, j) => a + (+j.amount || 0), 0)); const left = Math.max(0, r2(share - saved));
+    const daily = Math.ceil(left / cy.daysLeft); const todayIn = r2(mine.filter(j => j.date === t).reduce((a, j) => a + (+j.amount || 0), 0));
+    const days = new Set(mine.map(j => j.date)).size;
+    return { id: m.id, share, saved, left, daily, todayIn, days, pct: share ? Math.min(100, Math.round(saved / share * 100)) : 0, list: mine };
+  });
+  return { cy, rows, amount };
+}
+
+/* ---------- تقرير الأسبوع ---------- */
+export function weekRange(offset = 0, t = today()) {
+  const end = new Date(t + "T00:00:00Z"); end.setUTCDate(end.getUTCDate() - 7 * offset);
+  const start = new Date(end); start.setUTCDate(start.getUTCDate() - 6);
+  return { from: start.toISOString().slice(0, 10), to: end.toISOString().slice(0, 10) };
 }

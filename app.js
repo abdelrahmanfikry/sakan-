@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, addDoc as fbAdd, setDoc as fbSet, updateDoc as fbUpd, deleteDoc as fbDel, getDoc, writeBatch, deleteField, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
-import * as C from "./core.js";
+import * as C from "./core.js?v=5";
 const { esc, r2, today, monthOf, monthName, iso, fmtDT, safeUrl, waPhone, icon, FUND } = C;
 
 const root = document.getElementById("root");
@@ -36,7 +36,7 @@ if(!configured){
   <p>الموقع محتاج يتربط بمشروع Firebase الأول.</p>
   <div class="card" style="text-align:right"><b>المطلوب:</b><ol style="margin:8px 0 0;padding-inline-start:20px;line-height:2">
   <li>اعمل مشروع مجاني على console.firebase.google.com</li><li>فعّل Authentication ← Google، وFirestore Database</li>
-  <li>انسخ إعدادات الويب في ملف <code>firebase-config.js</code></li><li>انسخ محتوى <code>firestore.rules</code> في Firestore ← Rules</li></ol>
+  <li>انسخ إعدادات الويب في ملف <code>js/firebase-config.js</code></li><li>انسخ محتوى <code>firestore.rules</code> في Firestore ← Rules</li></ol>
   <p class="sub" style="margin-top:10px">التفاصيل خطوة بخطوة في ملف README.md</p></div></div></div>`;
   throw new Error("Firebase not configured");
 }
@@ -61,9 +61,9 @@ async function deleteDoc(ref){ const info=auditInfo(ref); const b=info?beforeOf(
 async function setDoc(ref,d,o){ const info=auditInfo(ref); const b=info?beforeOf(info.col,info.id):null; await fbSet(ref,d,o); if(info) audit(b?"update":"create",info,b,d); }
 
 /* ---------------- state ---------------- */
-const LISTS=["users","roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","audit","closings"];
+const LISTS=["users","roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","audit","closings","prices","jar"];
 const S = { user:null, memberships:{}, hid:null, house:null, users:{}, roster:[], expenses:[], payments:[], fund:[], shopping:[], chores:[], notes:[], polls:[], meters:[], items:[], contacts:[],
-  guests:[], loans:[], audit:[], closings:[], autoRec:new Set(), seenBefore:null,
+  guests:[], loans:[], audit:[], closings:[], prices:[], jar:[], weekOff:0, autoRec:new Set(), seenBefore:null,
   loaded:{}, unsubs:[], view:"home", f:{month:"",cat:"",mem:"",q:""}, showBought:false, dirty:false, booting:true };
 const guestCats = () => S.house?.guestCats || [...new Set(C.GUEST_CATS.map(mapCat).concat(cats().filter(c=>["سوبرماركت","بقالة"].includes(c))))].filter(c=>c!=="أخرى");
 const cats = () => (S.house?.categories?.length ? S.house.categories : C.CATS);
@@ -124,7 +124,7 @@ function openHouse(hid){
   S.unsubs.push(onSnapshot(collection(db,"houses",hid,"users"), s=>{ S.users={}; s.docs.forEach(d=>S.users[d.id]=d.data()); done("users");
     if(S.user && !S.users[S.user.uid] && S.loaded.house===true){ leaveLocal(hid); } }, err("users")));
   const sorters={roster:(a,b)=>(a.order??0)-(b.order??0)};
-  ["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings"].forEach(k=>
+  ["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar"].forEach(k=>
     S.unsubs.push(onSnapshot(collection(db,"houses",hid,k), s=>{ S[k]=s.docs.map(d=>({id:d.id,...d.data()})); sorters[k]&&S[k].sort(sorters[k]); done(k); }, err(k))));
   S.unsubs.push(onSnapshot(query(collection(db,"houses",hid,"audit"),orderBy("at","desc"),limit(300)), s=>{ S.audit=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||"").localeCompare(a.at||"")); done("audit"); }, err("audit")));
 }
@@ -188,7 +188,7 @@ async function joinFlow(code){
 /* ---------------- navigation ---------------- */
 const NAV=[
   ["home","الرئيسية","home",null],["notifs","الإشعارات","bell","notifications"],["expenses","المصاريف","receipt",null],["payments","التسويات","swap","payments"],["loans","السلف","hand","loans"],["fund","الصندوق","piggy","fund"],
-  ["shopping","المشتريات","cart","shopping"],["chores","المهام","broom","chores"],["guests","الضيوف","guest","guests"],["board","الإعلانات","mega","board"],["polls","التصويت","poll","polls"],
+  ["shopping","المشتريات","cart","shopping"],["prices","الأسعار","tag","prices"],["jar","حصالة الإيجار","piggy","rentJar"],["weekly","تقرير الأسبوع","sparkle","weekly"],["chores","المهام","broom","chores"],["guests","الضيوف","guest","guests"],["board","الإعلانات","mega","board"],["polls","التصويت","poll","polls"],
   ["meters","العدادات","bolt","meters"],["deposits","التأمين والعهد","shield","deposits"],["contacts","أرقام وقوانين","phone","contacts"],
   ["members","الأعضاء","users",null],["stats","الإحصائيات","chart","stats"],["closing","قفل الشهر","file","closing"],["activity","النشاط","clock","activity"],["audit","سجل التعديلات","history","audit"],["settings","الإدارة","gear","@admin"]];
 const navItems = () => NAV.filter(([, , , f])=> f===null || (f==="@admin"?isAdmin():F(f)));
@@ -232,7 +232,7 @@ function render(){
   if(ready) bindView();
 }
 function viewHtml(){
-  const V={home,notifs,expenses,payments,loans,fund,shopping,chores,guests,board,polls,meters,deposits,contacts,members,stats,closing,activity,audit:auditView,settings};
+  const V={prices:pricesView,jar:jarView,weekly:weeklyView,home,notifs,expenses,payments,loans,fund,shopping,chores,guests,board,polls,meters,deposits,contacts,members,stats,closing,activity,audit:auditView,settings};
   const head=(t,s,tools="")=>`<div class="topbar"><div><h1>${t}</h1>${s?`<div class="sub">${s}</div>`:""}</div><div class="tools">${tools}</div></div>`;
   return (V[S.view]||home)(head);
 }
@@ -285,6 +285,7 @@ function home(head){
   if(F("loans")) pendingLoans().forEach(l=>alerts.push(`<div class="row-item"><div class="ic-round ins">${icon("hand")}</div><div class="grow"><b>${esc(mName(l.from))} ${l.type==="repay"?"بيقول إنه سدّد":"بيقول إنه سلّف"} ${money(l.amount)}${l.to!==mine?" لـ "+esc(mName(l.to)):""}</b><div class="tiny">${esc(l.date)}${l.note?" · "+esc(l.note):""}</div></div><div class="actions"><button class="btn sm primary" data-act="confirmLoan" data-id="${l.id}">${icon("check")} تأكيد</button><button class="btn sm danger" data-act="delLoan" data-id="${l.id}">لأ</button></div></div>`));
   pendingFund().forEach(f=>alerts.push(`<div class="row-item"><div class="ic-round ins">${icon("piggy")}</div><div class="grow"><b>${esc(mName(f.memberId))} دفع اشتراك الصندوق ${money(f.amount)}</b><div class="tiny">${esc(f.date)}</div></div><button class="btn sm primary" data-act="confirmFund" data-id="${f.id}">${icon("check")} تأكيد</button></div>`));
   dueBills().filter(b=>b.left<=5).forEach(b=>alerts.push(`<div class="row-item"><div class="ic-round neg">${icon("clock")}</div><div class="grow"><b>${esc(b.title)} — ${money(b.amount)}</b><div class="tiny">${b.left<0?`متأخرة ${-b.left} يوم`:b.left===0?"مستحقة النهارده":`مستحقة بعد ${b.left} يوم`}</div></div>${isAdmin()?`<button class="btn sm" data-act="applyRec">سجّل الثابتة</button>`:""}</div>`));
+  if(F("prices")) priceAlerts().slice(0,3).forEach(g=>alerts.push(`<div class="row-item"><div class="ic-round neg">${icon("tag")}</div><div class="grow"><b>«${esc(g.name)}» غلي ${C.r2(g.change)}٪</b><div class="tiny">${money(g.prev.price)} ← ${money(g.last.price)}${g.last.shop?" · "+esc(g.last.shop):""}${g.cheap&&g.cheap.price<g.last.price?` · أرخص في ${esc(g.cheap.shop||"—")} بـ ${money(g.cheap.price)}`:""}</div></div><button class="btn sm ghost" data-go="prices">الأسعار</button></div>`));
   if(F("budgets")){ const bud=S.house.budgets||{}; Object.entries(bud).forEach(([c,v])=>{ const s=S.expenses.filter(e=>monthOf(e.date)===m&&e.category===c).reduce((a,e)=>a+(+e.amount||0),0); if(+v>0&&s>v) alerts.push(`<div class="row-item"><div class="ic-round neg">${icon("chart")}</div><div class="grow"><b>تخطّيتوا ميزانية «${esc(c)}»</b><div class="tiny">${money(s)} من ${money(v)}</div></div></div>`); }); }
   const turns=F("chores")?S.chores.map(c=>({c,t:C.choreTurn(c,S.roster)})).filter(x=>x.t.who&&(!mine||x.t.who===mine)):[];
   const pinned=F("board")?S.notes.filter(n=>n.pinned).slice(0,2):[];
@@ -297,6 +298,8 @@ function home(head){
     <div class="row"><span class="pill">مصاريف ${esc(monthName(m))} ${money(totM)}</span>${fundBal!==null?`<span class="pill">الصندوق ${money(fundBal)}</span>`:""}${openPolls?`<span class="pill">${openPolls} تصويت مستني صوتك</span>`:""}</div>
     <div class="row">${canAddExp()?`<button class="btn" data-act="addExp">${icon("plus")} مصروف</button>`:""}${mine&&F("statement")?`<button class="btn ghost" data-act="statement" data-id="${mine}">${icon("receipt")} كشف حسابي</button>`:""}</div></section>
   ${alerts.length?`<section class="card"><div class="card-head"><h2 class="h">محتاج انتباهك</h2><span class="chip neg">${alerts.length}</span></div><div class="list">${alerts.join("")}</div></section>`:""}
+  ${homeJar()}
+  ${F("weekly")&&["5","6"].includes(String(new Date().getDay()))?`<section class="card"><div class="row-item" style="border:0;padding:0"><div class="ic-round acc">${icon("sparkle")}</div><div class="grow"><b>تقرير الأسبوع جاهز 😄</b><div class="tiny">مين شايل السكن ومين نايم في العسل — ابعته للجروب</div></div><button class="btn sm primary" data-go="weekly">افتحه</button></div></section>`:""}
   ${F("payments")?`<section class="card"><div class="card-head"><h2 class="h">تحويلاتك</h2><button class="btn sm ghost" data-go="payments">كل التسويات</button></div>${myPlan.length?`<div class="settle">${myPlan.map(settleCard).join("")}</div>`:emptyBox("check",mine?"مفيش عليك ولا ليك تحويلات":"اختار اسمك علشان تشوف تحويلاتك")}</section>`:""}
   ${turns.length?`<section class="card"><div class="card-head"><h2 class="h">دورك</h2><button class="btn sm ghost" data-go="chores">الكل</button></div><div class="list">${turns.map(({c,t})=>`<div class="row-item"><div class="ic-round acc">${icon("broom")}</div><div class="grow"><b>${esc(c.title)}</b><div class="tiny">فاضل ${t.daysLeft} يوم</div></div></div>`).join("")}</div></section>`:""}
   <section class="card"><div class="card-head"><h2 class="h">آخر المصاريف</h2><button class="btn sm ghost" data-go="expenses">الكل</button></div>${expRows([...S.expenses].sort((a,b)=>(b.createdAt||"").localeCompare(a.createdAt||"")).slice(0,5),true)}</section>`;
@@ -542,6 +545,133 @@ function importData(d,isRestore){
   },isRestore?"النسخة اترجّعت":"اتستوردت البيانات"),isRestore?"اللي في النسخة هيرجع زي ما كان، والحاجات اللي اتضافت بعدها هتفضل. هتتعمل نسخة من الوضع الحالي الأول.":"البيانات هتتضاف على اللي موجود في السكن.");
 }
 
+/* ---------------- ذاكرة الأسعار ---------------- */
+const priceAlerts = () => { const lim=C.weekRange(0).from; const d=new Date(lim+"T00:00:00Z"); d.setUTCDate(d.getUTCDate()-7); const since=d.toISOString().slice(0,10);
+  return C.priceGroups(S.prices).filter(g=>g.prev&&g.change>=10&&(g.last.date||"")>=since); };
+function pricesView(head){
+  const gs=C.priceGroups(S.prices), q=C.norm(S.f.pq||""); const list=q?gs.filter(g=>g.key.includes(q)):gs;
+  const up=gs.filter(g=>g.prev&&g.change>0).length, down=gs.filter(g=>g.prev&&g.change<0).length;
+  const chg=g=>!g.prev?'<span class="chip">أول مرة</span>':g.change>0?`<span class="chip neg">▲ ${C.r2(g.change)}٪</span>`:g.change<0?`<span class="chip pos">▼ ${C.r2(-g.change)}٪</span>`:'<span class="chip">ثابت</span>';
+  return head("ذاكرة الأسعار",`${gs.length} حاجة · ${up} غليت · ${down} رخصت`,canWrite()?`<button class="btn primary" data-act="addPrice">${icon("plus")} سعر</button>`:"")+
+  `<section class="card"><input id="pQ" placeholder="دوّر على حاجة… (عيش، لبن، فراخ)" value="${esc(S.f.pq||"")}">
+   ${list.length?`<div class="list" style="margin-top:12px">${list.map(g=>`<button class="row-item" data-act="priceHist" data-k="${esc(g.key)}" style="width:100%;text-align:right;cursor:pointer"><div class="ic-round ${g.change>0?"neg":g.change<0?"pos":"acc"}">${icon("tag")}</div>
+     <div class="grow"><b>${esc(g.name)}${g.last.unit?` <span class="sub">/ ${esc(g.last.unit)}</span>`:""}</b><div class="tiny">آخر سعر ${esc(g.last.date)}${g.last.shop?" · "+esc(g.last.shop):""}${g.prev?` · قبله ${money(g.prev.price)}`:""}${g.shops>1&&g.cheap?` · الأرخص: ${esc(g.cheap.shop)} بـ ${money(g.cheap.price)}`:""}</div></div>
+     <div style="display:grid;gap:6px;justify-items:end"><span class="amt">${money(g.last.price)}</span>${chg(g)}</div></button>`).join("")}</div>`
+   :emptyBox("tag",q?"مفيش حاجة بالاسم ده":"لسه مفيش أسعار","سجّل سعر أي حاجة تشتريها، والموقع يفتكره وينبّهك لو غلي.")}</section>`;
+}
+function priceModal(preset={}){
+  const names=[...new Set(S.prices.map(p=>p.item))].slice(0,200), shops=[...new Set(S.prices.map(p=>p.shop).filter(Boolean))].slice(0,100);
+  modal(`<h3>سعر حاجة<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="form">
+   <label class="f full">الحاجة<input id="prI" list="prIL" maxlength="50" placeholder="مثلًا: عيش بلدي" value="${esc(preset.item||"")}"><datalist id="prIL">${names.map(n=>`<option value="${esc(n)}">`).join("")}</datalist></label>
+   <label class="f">السعر<input id="prP" type="number" inputmode="decimal" min="0" step="0.25"></label>
+   <label class="f">الوحدة<input id="prU" maxlength="20" placeholder="كيلو، علبة، رغيف…" value="${esc(preset.unit||"")}"></label>
+   <label class="f">المحل<input id="prS" list="prSL" maxlength="40" placeholder="اختياري" value="${esc(preset.shop||"")}"><datalist id="prSL">${shops.map(n=>`<option value="${esc(n)}">`).join("")}</datalist></label>
+   <label class="f">التاريخ<input id="prD" type="date" value="${today()}"></label>
+   <div class="full tiny" id="prHint"></div></div>
+   <div class="mfoot"><button class="btn primary" id="prSave">حفظ</button><button class="btn" data-close>إلغاء</button></div>`,ov=>{
+    const I=ov.querySelector("#prI"), hint=ov.querySelector("#prHint");
+    const show=()=>{ const g=C.priceGroups(S.prices).find(x=>x.key===C.itemKey(I.value)); hint.innerHTML=g?`آخر سعر: <b>${money(g.last.price)}</b>${g.last.shop?" في "+esc(g.last.shop):""} (${esc(g.last.date)})${g.cheap&&g.shops>1?` · الأرخص ${esc(g.cheap.shop)} بـ ${money(g.cheap.price)}`:""}`:""; if(g&&!ov.querySelector("#prU").value) ov.querySelector("#prU").value=g.last.unit||""; };
+    I.addEventListener("change",show); show();
+    ov.querySelector("#prSave").onclick=async()=>{ const item=I.value.trim(), price=C.r2(ov.querySelector("#prP").value);
+      if(!item) return toast("اكتب الحاجة"); if(!(price>0)) return toast("اكتب السعر");
+      const g=C.priceGroups(S.prices).find(x=>x.key===C.itemKey(item));
+      try{ await addDoc(HC("prices"),{item,price,unit:ov.querySelector("#prU").value.trim(),shop:ov.querySelector("#prS").value.trim(),date:ov.querySelector("#prD").value||today(),memberId:myMember(),createdBy:S.user.uid,createdAt:iso()}); closeModal();
+        if(g&&+g.last.price>0){ const c=C.r2((price-g.last.price)/g.last.price*100); toast(c>0?`اتسجّل — غلي ${c}٪ عن آخر مرة 😤`:c<0?`اتسجّل — أرخص ${-c}٪ من آخر مرة 👏`:"اتسجّل — نفس السعر"); } else toast("اتسجّل"); }catch(e){ fail(e); } };
+  });
+}
+function priceHist(k){
+  const g=C.priceGroups(S.prices).find(x=>x.key===k); if(!g) return;
+  const max=Math.max(...g.list.map(p=>+p.price||0))||1; const pts=g.list.slice(0,12).reverse();
+  modal(`<h3>${esc(g.name)}<button class="btn icon ghost" data-close>${icon("x")}</button></h3>
+   <div class="bars" style="display:flex;align-items:flex-end;gap:6px;height:120px;margin-bottom:14px">${pts.map(p=>`<div title="${esc(p.date)} — ${esc(money(p.price))}" style="flex:1;background:var(--accent);opacity:.85;border-radius:6px 6px 0 0;height:${Math.max(6,Math.round(p.price/max*100))}%"></div>`).join("")}</div>
+   <div class="list">${g.list.map(p=>`<div class="row-item"><div class="grow"><b>${money(p.price)}${p.unit?` / ${esc(p.unit)}`:""}</b><div class="tiny">${esc(p.date)}${p.shop?" · "+esc(p.shop):""} · ${esc(mName(p.memberId))}</div></div>${isAdmin()||p.createdBy===S.user.uid?`<button class="btn sm icon danger" data-act="delPrice" data-id="${p.id}">${icon("trash")}</button>`:""}</div>`).join("")}</div>
+   <div class="mfoot">${canWrite()?`<button class="btn primary" data-act="addPrice" data-item="${esc(g.name)}">${icon("plus")} سعر جديد</button>`:""}<button class="btn" data-close>تمام</button></div>`,ov=>ov.addEventListener("click",e=>{ const b=e.target.closest("[data-act]"); if(b){ closeModal(); handle(b.dataset.act,b); } }));
+}
+
+/* ---------------- حصالة الإيجار ---------------- */
+function jarCfg(){ const c=S.house?.jarCfg||{}; if(+c.amount>0) return c;
+  const r=(S.house?.recurring||[]).find(x=>/ايجار|إيجار/.test(x.title||"")||x.category==="الإيجار");
+  const e=S.expenses.filter(x=>x.category==="الإيجار"||/ايجار|إيجار/.test(x.title||"")).sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
+  const members=e&&e.split?.mode!=="custom"?(e.split?.members||null):null;
+  if(r) return {amount:+r.amount, dueDay:+r.dueDay||1, auto:true, members};
+  return e?{amount:+e.amount, dueDay:+e.date.slice(8,10)||1, auto:true, members}:{amount:0,dueDay:1}; }
+function homeJar(){ if(!F("rentJar")||!myMember()) return ""; const cfg=jarCfg(); if(!(+cfg.amount>0)) return "";
+  const st=C.jarStatus(cfg,S.roster,S.jar), r=st.rows.find(x=>x.id===myMember()); if(!r) return "";
+  return `<section class="card"><div class="card-head"><h2 class="h">${icon("piggy")} حصالة الإيجار</h2><button class="btn sm ghost" data-go="jar">التفاصيل</button></div>
+   <div class="progress" style="height:10px;border-radius:99px;background:var(--line);overflow:hidden"><div style="height:100%;width:${r.pct}%;background:var(--accent)"></div></div>
+   <div class="actions" style="margin-top:10px;justify-content:space-between"><span class="sub">حوّشت ${money(r.saved)} من ${money(r.share)} · فاضل ${st.cy.daysLeft} يوم</span>
+   ${r.left>0?(r.todayIn>0?`<span class="chip pos">حطّيت النهارده ${money(r.todayIn)} ✓</span>`:`<button class="btn sm primary" data-act="jarIn" data-amt="${r.daily}">حط ${money(r.daily)} النهارده</button>`):`<span class="chip pos">نصيبك جاهز 🎉</span>`}</div></section>`; }
+function jarView(head){
+  const cfg=jarCfg(), mine=myMember();
+  const setBtn=isAdmin()?`<button class="btn" data-act="jarCfg">${icon("gear")} الإعداد</button>`:"";
+  if(!(+cfg.amount>0)) return head("حصالة الإيجار","",setBtn)+`<section class="card">${emptyBox("piggy","حدّد الإيجار الأول",isAdmin()?"دوس «الإعداد» واكتب مبلغ الإيجار ويوم الدفع.":"المدير لسه ما حدّدش الإيجار.")}</section>`;
+  const st=C.jarStatus(cfg,S.roster,S.jar), me_=st.rows.find(x=>x.id===mine);
+  const all=(PM("seeAll")||isAdmin())?st.rows:st.rows.filter(x=>x.id===mine);
+  return head("حصالة الإيجار",`الإيجار ${money(st.amount)} · الدفع يوم ${st.cy.next} · فاضل ${st.cy.daysLeft} يوم${cfg.auto?" · المبلغ متاخد من فاتورة الإيجار":""}`,setBtn)+linkBanner()+
+  (me_?`<section class="hero"><div class="l">حصالتك</div><div class="big num">${money(me_.saved)}</div>
+    <div class="progress" style="height:10px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden;margin:6px 0 10px"><div style="height:100%;width:${me_.pct}%;background:#fff"></div></div>
+    <div class="row"><span class="pill">نصيبك ${money(me_.share)}</span><span class="pill">فاضل ${money(me_.left)}</span>${me_.left>0?`<span class="pill">محتاج ${money(me_.daily)} في اليوم</span>`:`<span class="pill">جاهز 🎉</span>`}</div>
+    <div class="row">${me_.left>0?`<button class="btn" data-act="jarIn" data-amt="${me_.daily}">${icon("plus")} حط ${money(me_.daily)}</button>`:""}<button class="btn ghost" data-act="jarIn">مبلغ تاني</button></div></section>`:"")+
+  `<section class="card"><div class="card-head"><h2 class="h">مين حوّش كام</h2></div><div class="list">${all.sort((a,b)=>b.pct-a.pct).map((r,i)=>`<div class="row-item"><div class="ic-round ${r.pct>=100?"pos":"acc"}">${i===0&&r.pct>0?"🏆":icon("piggy")}</div><div class="grow"><b>${esc(mName(r.id))}${r.id===mine?" (انت)":""}</b>
+    <div class="progress" style="height:6px;border-radius:99px;background:var(--line);overflow:hidden;margin:6px 0"><div style="height:100%;width:${r.pct}%;background:var(--accent)"></div></div>
+    <div class="tiny">${money(r.saved)} من ${money(r.share)} · ${r.days} يوم حوّش فيهم${r.left>0?` · محتاج ${money(r.daily)}/يوم`:""}</div></div><span class="chip ${r.pct>=100?"pos":""}">${r.pct}٪</span></div>`).join("")}</div>
+   <p class="tiny" style="margin:10px 0 0">الحصالة دي للتنظيم بس — الفلوس بتفضل معاك، ومش بتأثر على الحسابات. يوم الإيجار تبدأ دورة جديدة لوحدها.</p></section>`+
+  (me_&&me_.list.length?`<section class="card"><div class="card-head"><h2 class="h">حركاتك الدورة دي</h2></div><div class="list">${me_.list.sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(j=>`<div class="row-item"><div class="grow"><b>${money(j.amount)}</b><div class="tiny">${esc(j.date)}</div></div><button class="btn sm icon danger" data-act="delJar" data-id="${j.id}">${icon("trash")}</button></div>`).join("")}</div></section>`:"");
+}
+
+/* ---------------- تقرير الأسبوع ---------------- */
+function weekData(off){
+  const w=C.weekRange(off), pw=C.weekRange(off+1), inW=(d,r)=>d>=r.from&&d<=r.to;
+  const isRent=e=>e.category==="الإيجار"||/ايجار|إيجار/.test(e.title||"");
+  const rent=S.expenses.filter(e=>inW(e.date||"",w)&&isRent(e));
+  const ex=S.expenses.filter(e=>inW(e.date||"",w)&&!isRent(e)), pex=S.expenses.filter(e=>inW(e.date||"",pw)&&!isRent(e));
+  const tot=ex.reduce((a,e)=>a+(+e.amount||0),0), ptot=pex.reduce((a,e)=>a+(+e.amount||0),0);
+  const paid={}, share={}; active().forEach(m=>{ paid[m.id]=0; share[m.id]=0; });
+  ex.forEach(e=>{ if(paid[e.paidBy]!==undefined) paid[e.paidBy]+=+e.amount||0; const sh=C.shares(e,S.roster); Object.entries(sh).forEach(([k,v])=>{ if(share[k]!==undefined) share[k]+=v; }); });
+  const byCat={}; ex.forEach(e=>{ const c=e.category||"أخرى"; byCat[c]=(byCat[c]||0)+(+e.amount||0); });
+  const pays=S.payments.filter(p=>inW(p.date||"",w)&&C.confirmed(p));
+  const bal=C.balances(data(),""); const debtor=active().map(m=>({id:m.id,net:bal[m.id]?.net||0})).sort((a,b)=>a.net-b.net)[0];
+  const rises=F("prices")?C.priceGroups(S.prices).filter(g=>g.prev&&g.change>=5&&inW(g.last.date||"",w)):[];
+  return {w,ex,tot,ptot,paid,share,byCat,pays,debtor,rises,rent};
+}
+function weeklyText(d){
+  const pick=(arr,seed)=>arr[Math.abs([...seed].reduce((a,c)=>a*31+c.charCodeAt(0)|0,7))%arr.length];
+  const sd=d.w.from, L=[]; const fmt=n=>money(n);
+  L.push(`📊 تقرير أسبوع ${S.house.name||"السكن"}`); L.push(`من ${d.w.from} لـ ${d.w.to}`); L.push("");
+  d.rent.forEach(e=>L.push(`🏠 ${e.title} اتدفع (${fmt(e.amount)}) — شكرًا لـ ${mName(e.paidBy)} 🙏`)); if(d.rent.length) L.push("");
+  if(!d.ex.length){ L.push(pick(["الأسبوع ده محدش صرف ولا جنيه… إحنا عايشين على الهوا؟ 🌬️","صفر مصاريف! يا إما بقينا زهّاد يا إما محدش بيسجّل 👀"],sd)); return L.join("\n"); }
+  L.push(`💸 صرفنا ${fmt(d.tot)} في ${d.ex.length} بند${d.rent.length?" (من غير الإيجار)":""}`);
+  if(d.ptot>0){ const c=Math.round((d.tot-d.ptot)/d.ptot*100); if(c>=10) L.push(pick([`📈 أكتر من الأسبوع اللي فات بـ ${c}٪… مين فتح المحفظة على البحري؟`,`📈 زيادة ${c}٪ عن الأسبوع اللي فات — الفلوس بتجري يا جماعة`],sd)); else if(c<=-10) L.push(pick([`👏 وفّرنا ${-c}٪ عن الأسبوع اللي فات — كمّلوا كده يا أبطال`,`📉 أقل بـ ${-c}٪ من الأسبوع اللي فات، شكلنا بقينا عاقلين`],sd)); }
+  L.push("");
+  const payers=Object.entries(d.paid).sort((a,b)=>b[1]-a[1]); const [tp,tv]=payers[0]||[];
+  if(tv>0) L.push(pick([`💪 ${mName(tp)} شايل السكن على كتافه — دفع ${fmt(tv)}`,`🦸 بطل الأسبوع: ${mName(tp)} دفع ${fmt(tv)}`,`👑 ${mName(tp)} الممول الرسمي للسكن الأسبوع ده (${fmt(tv)})`],sd+tp));
+  const zero=payers.filter(([k,v])=>v===0&&d.share[k]>0).map(([k])=>mName(k));
+  const pl=zero.length>1; if(zero.length) L.push(pick([`😴 ${zero.join(" و")} ${pl?"مدفعوش":"مدفعش"} ولا جنيه… إحنا مش زعلانين، إحنا بس بنسجّل 📝`,`🛌 ${zero.join(" و")} ${pl?"نايمين في العسل — كلوا وشربوا ومدفعوش":"نايم في العسل — كل وشرب ومدفعش"}`],sd+zero[0]));
+  const cats=Object.entries(d.byCat).sort((a,b)=>b[1]-a[1]); const [tc,tcv]=cats[0];
+  const pct=Math.round(tcv/d.tot*100);
+  const food=/غدا|غداء|فطار|عشا|اكل|أكل|مطعم/; const ride=/اوبر|أوبر|مواصل/;
+  if(food.test(tc)) L.push(pick([`🍗 الأكل خد ${pct}٪ من المصاريف… إحنا ساكنين ولا فاتحين مطعم؟`,`🍔 ${pct}٪ أكل! البطون شغالة أوفر تايم`],sd));
+  else if(ride.test(tc)) L.push(pick([`🚕 ${tc} خد ${pct}٪ — الرجلين بقت للزينة بس`,`🚖 ${pct}٪ مواصلات… السواقين بيدعولنا`],sd));
+  else L.push(`🏷️ أكتر حاجة صرفنا عليها: ${tc} (${pct}٪)`);
+  const big=d.ex.slice().sort((a,b)=>b.amount-a.amount)[0]; L.push(`💎 أغلى بند: «${big.title}» بـ ${fmt(big.amount)} (${mName(big.paidBy)})`);
+  const me_=Object.entries(d.share).sort((a,b)=>b[1]-a[1])[0]; if(me_&&me_[1]>0) L.push(`🍽️ أكتر واحد استفاد: ${mName(me_[0])} — نصيبه ${fmt(me_[1])}`);
+  d.rises.slice(0,2).forEach(g=>L.push(`😤 ${g.name} غلي ${C.r2(g.change)}٪ (بقى ${fmt(g.last.price)})`));
+  if(F("rentJar")){ const cfg=jarCfg(); if(+cfg.amount>0){ const st=C.jarStatus(cfg,S.roster,S.jar); const b=st.rows.slice().sort((a,b)=>b.pct-a.pct)[0]; if(b&&b.pct>0) L.push(`🐷 أشطر واحد في حصالة الإيجار: ${mName(b.id)} (${b.pct}٪)`); } }
+  L.push("");
+  if(d.pays.length) L.push(`🔁 ${d.pays.length} تحويل اتعمل الأسبوع ده`);
+  if(d.debtor&&d.debtor.net<-1) L.push(pick([`⏰ أكبر حساب مفتوح على ${mName(d.debtor.id)} بـ ${fmt(-d.debtor.net)} — إنستاباي مستنيك 😅`,`📌 ${mName(d.debtor.id)} عليه ${fmt(-d.debtor.net)}… الحساب يجمع`],sd+d.debtor.id));
+  else L.push("✅ الحسابات كلها متصفّية تقريبًا — عاش");
+  L.push(""); L.push(`التفاصيل: ${location.origin+location.pathname}`);
+  return L.join("\n");
+}
+function weeklyView(head){
+  const off=S.weekOff||0, d=weekData(off), txt=weeklyText(d);
+  return head("تقرير الأسبوع",`${d.w.from} ← ${d.w.to}`,`<button class="btn sm" data-act="weekPrev">‹ الأسبوع اللي قبله</button>${off>0?`<button class="btn sm" data-act="weekNext">اللي بعده ›</button>`:""}`)+
+  `<section class="card"><div style="white-space:pre-wrap;line-height:1.9;font-size:15px">${esc(txt)}</div>
+   <div class="actions" style="margin-top:14px"><a class="btn primary" href="https://wa.me/?text=${encodeURIComponent(txt)}" target="_blank" rel="noopener noreferrer">${icon("wa")} ابعته للجروب</a><button class="btn" data-copy="${esc(txt)}" data-msg="اتنسخ التقرير">${icon("copy")} نسخ</button></div></section>
+  ${d.ex.length?`<section class="card"><div class="card-head"><h2 class="h">مين دفع ومين استفاد</h2></div><div class="list">${active().map(m=>{ const p=d.paid[m.id]||0, s=d.share[m.id]||0, n=p-s; return `<div class="row-item"><div class="grow"><b>${esc(m.name)}</b><div class="tiny">دفع ${money(p)} · نصيبه ${money(s)}</div></div><span class="chip ${n>0.5?"pos":n<-0.5?"neg":""}">${n>0.5?"+":""}${money(n)}</span></div>`; }).join("")}</div></section>`:""}`;
+}
+
 /* ---------------- new features ---------------- */
 const pendingLoans = () => S.loans.filter(l=>!C.confirmed(l) && (isAdmin() || l.to===myMember()));
 function myEvents(){
@@ -590,8 +720,8 @@ function afterData(){ if(!S.user||!S.hid||!S.house) return; if(!["house","users"
 function touchActive(){ if(S.activeTouched||!S.users[S.user.uid]) return; S.activeTouched=true; const la=me().lastActive||""; if(la&&Date.now()-new Date(la)<10*60e3) return;
   const ua=navigator.userAgent; const device=/iPhone|iPad/.test(ua)?"آيفون":/Android/.test(ua)?"أندرويد":/Windows/.test(ua)?"ويندوز":/Mac/.test(ua)?"ماك":"جهاز تاني";
   updateDoc(H("users",S.user.uid),{lastActive:iso(),device}).catch(()=>{}); }
-const BK_COLS=["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings"];
-const BK_HOUSE=["name","currency","features","perms","categories","recurring","budgets","guestCats","meterPrices","fundCfg","rulesText","depositHolder","lockedMonths","recSkip"];
+const BK_COLS=["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar"];
+const BK_HOUSE=["jarCfg","name","currency","features","perms","categories","recurring","budgets","guestCats","meterPrices","fundCfg","rulesText","depositHolder","lockedMonths","recSkip"];
 function backupData(){ const o={version:2,exportedAt:iso(),houseName:S.house.name,house:{}}; BK_HOUSE.forEach(k=>{ if(S.house[k]!==undefined) o.house[k]=S.house[k]; });
   o.users=Object.fromEntries(Object.entries(S.users).map(([u,x])=>[u,{name:x.name||"",role:x.role,memberId:x.memberId||null}])); BK_COLS.forEach(k=>o[k]=S[k]); return o; }
 async function autoBackup(force){
@@ -660,9 +790,9 @@ function printReport(m){
   setTimeout(()=>window.print(),150);
 }
 window.addEventListener("afterprint",()=>{ const pr=document.getElementById("printRoot"); if(pr) pr.innerHTML=""; });
-const COL_AR={import:"بيانات",expenses:"مصروف",payments:"دفعة",fund:"اشتراك صندوق",roster:"ساكن",users:"حساب",house:"إعدادات السكن",shopping:"مشتريات",chores:"مهمة",notes:"إعلان",polls:"تصويت",meters:"قراية عداد",items:"عهدة",contacts:"رقم",guests:"ضيف",loans:"سلفة",closings:"قفل شهر"};
+const COL_AR={import:"بيانات",expenses:"مصروف",payments:"دفعة",fund:"اشتراك صندوق",roster:"ساكن",users:"حساب",house:"إعدادات السكن",shopping:"مشتريات",chores:"مهمة",notes:"إعلان",polls:"تصويت",meters:"قراية عداد",items:"عهدة",contacts:"رقم",guests:"ضيف",loans:"سلفة",closings:"قفل شهر",prices:"سعر",jar:"حصالة"};
 const ACT_AR={create:"أضاف",update:"عدّل",delete:"حذف"};
-const FIELD_AR={title:"البند",amount:"المبلغ",date:"التاريخ",category:"الفئة",paidBy:"دفعه",split:"التقسيم",note:"ملاحظة",from:"من",to:"إلى",status:"الحالة",method:"الطريقة",name:"الاسم",weight:"الوزن",active:"ساكن",role:"الدور",memberId:"مربوط بـ",deposit:"التأمين",item:"الحاجة",qty:"الكمية",bought:"اتشرى",text:"النص",pinned:"مثبّت",reading:"القراية",type:"النوع",hostId:"المستضيف",factor:"الحصة",lockedMonths:"الشهور المقفولة",recurring:"الفواتير الثابتة",categories:"أنواع المصاريف",budgets:"الميزانية",guestCats:"أنواع الضيوف",recSkip:"فواتير متشالة",meterPrices:"أسعار العدادات",fundCfg:"الصندوق",currency:"العملة",rulesText:"قوانين السكن",depositHolder:"ماسك التأمين",noGuests:"من غير ضيوف",room:"الأوضة",lastDone:"آخر مرة",closed:"مقفول"};
+const FIELD_AR={price:"السعر",shop:"المحل",unit:"الوحدة",jarCfg:"الحصالة",title:"البند",amount:"المبلغ",date:"التاريخ",category:"الفئة",paidBy:"دفعه",split:"التقسيم",note:"ملاحظة",from:"من",to:"إلى",status:"الحالة",method:"الطريقة",name:"الاسم",weight:"الوزن",active:"ساكن",role:"الدور",memberId:"مربوط بـ",deposit:"التأمين",item:"الحاجة",qty:"الكمية",bought:"اتشرى",text:"النص",pinned:"مثبّت",reading:"القراية",type:"النوع",hostId:"المستضيف",factor:"الحصة",lockedMonths:"الشهور المقفولة",recurring:"الفواتير الثابتة",categories:"أنواع المصاريف",budgets:"الميزانية",guestCats:"أنواع الضيوف",recSkip:"فواتير متشالة",meterPrices:"أسعار العدادات",fundCfg:"الصندوق",currency:"العملة",rulesText:"قوانين السكن",depositHolder:"ماسك التأمين",noGuests:"من غير ضيوف",room:"الأوضة",lastDone:"آخر مرة",closed:"مقفول"};
 function fmtVal(k,v){ if(v==null||v==="") return "—"; if(["paidBy","from","to","memberId","hostId","addedBy","boughtBy"].includes(k)) return mName(v); if(k==="amount"||k==="deposit") return money(v);
   if(k==="split") return v.mode==="custom"?Object.entries(v.custom||{}).map(([a,b])=>`${mName(a)}: ${b}`).join("، "):(v.members||[]).map(mName).join("، ");
   if(k==="role") return C.ROLES[v]||v; if(k==="status") return v==="pending"?"مستنية تأكيد":"مؤكدة"; if(typeof v==="boolean") return v?"أيوه":"لأ"; if(Array.isArray(v)) return v.map(x=>x&&typeof x==="object"?(x.title||x.name||x.month||"بند"):x).join("، ")||"—"; if(typeof v==="object") return JSON.stringify(v).slice(0,80); return String(v); }
@@ -840,7 +970,7 @@ function inviteModal(){
 }
 function quickSheet(){
   const opts=[["qaSheet","sparkle","اكتب جملة",F("quickAdd")&&canAddExp()],["addExp","receipt","مصروف",canAddExp()],["addPay","swap","دفعة",F("payments")&&canAddExp()],["addFund","piggy","اشتراك صندوق",F("fund")&&canWrite()&&(isAdmin()||PM("memberFund"))&&myMember()],
-    ["quickShop","cart","حاجة ناقصة",F("shopping")&&canWrite()&&(isAdmin()||PM("memberShopping"))],["addMeter","bolt","قراية عداد",F("meters")&&canWrite()&&(isAdmin()||PM("memberMeters"))],["addPoll","poll","تصويت",F("polls")&&canWrite()&&(isAdmin()||PM("memberPolls"))]].filter(o=>o[3]);
+    ["addPrice","tag","سعر حاجة",F("prices")&&canWrite()],["addJar","piggy","حط في الحصالة",F("rentJar")&&canWrite()&&!!myMember()&&+(jarCfg().amount)>0],["quickShop","cart","حاجة ناقصة",F("shopping")&&canWrite()&&(isAdmin()||PM("memberShopping"))],["addMeter","bolt","قراية عداد",F("meters")&&canWrite()&&(isAdmin()||PM("memberMeters"))],["addPoll","poll","تصويت",F("polls")&&canWrite()&&(isAdmin()||PM("memberPolls"))]].filter(o=>o[3]);
   modal(`<h3>إضافة سريعة<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="sheet-grid">${opts.map(([a,ic,l])=>`<button data-qa="${a}"><span class="ic-round acc">${icon(ic)}</span>${l}</button>`).join("")}</div>`,ov=>{
     ov.querySelector(".sheet-grid").onclick=e=>{ const b=e.target.closest("[data-qa]"); if(!b) return; closeModal(); handle(b.dataset.qa,b); }; });
 }
@@ -873,6 +1003,7 @@ function bindView(){
   on("fAudit","change",e=>{ S.f.audit=e.target.value; render(); });
   on("impFile","change",e=>importFile(e.target.files[0]));
   on("fPerson","change",e=>{ S.f.person=e.target.value; render(); });
+  on("pQ","input",e=>{ S.f.pq=e.target.value; clearTimeout(bindView.p); bindView.p=setTimeout(()=>{ const pos=e.target.selectionStart; e.target.blur(); render(); const q=document.getElementById("pQ"); if(q){ q.focus(); q.setSelectionRange(pos,pos);} },300); });
   const c=document.getElementById("content");
   c.querySelectorAll("[data-feat]").forEach(i=>i.onchange=()=>upHouse({["features."+i.dataset.feat]:i.checked},i.checked?"اتشغّلت":"اتقفلت"));
   c.querySelectorAll("[data-perm]").forEach(i=>i.onchange=()=>upHouse({["perms."+i.dataset.perm]:i.checked},"اتحفظت الصلاحية"));
@@ -915,6 +1046,16 @@ function handle(a,b={dataset:{}}){
     case "logout": return signOut(auth);
     case "quick": return quickSheet();
     case "more": return moreSheet();
+    case "addPrice": return priceModal(b.dataset?.item?{item:b.dataset.item}:{});
+    case "priceHist": return priceHist(b.dataset.k);
+    case "delPrice": return confirmBox("حذف السعر ده؟","احذف",()=>run(()=>deleteDoc(H("prices",id)),"اتحذف"));
+    case "addJar": case "jarIn": { const amt=b.dataset?.amt; if(!myMember()) return toast("اختار اسمك الأول");
+      if(amt&&+amt>0) return run(()=>addDoc(HC("jar"),{memberId:myMember(),amount:C.r2(amt),date:today(),createdBy:S.user.uid,createdAt:iso()}),`🐷 حطّيت ${money(amt)}`);
+      return simpleModal("حط في الحصالة",[{id:"amount",label:"المبلغ",type:"number",attrs:'min="1" inputmode="decimal"'},{id:"date",label:"التاريخ",type:"date",value:today()}],async v=>{ if(!(+v.amount>0)){ toast("اكتب المبلغ"); return false; } await addDoc(HC("jar"),{memberId:myMember(),amount:C.r2(v.amount),date:v.date||today(),createdBy:S.user.uid,createdAt:iso()}); toast(`🐷 حطّيت ${money(v.amount)}`); }); }
+    case "delJar": return confirmBox("تشيل الحركة دي من الحصالة؟","شيل",()=>run(()=>deleteDoc(H("jar",id)),"اتشالت"));
+    case "jarCfg": { const c=jarCfg(); return simpleModal("إعداد حصالة الإيجار",[{id:"amount",label:"الإيجار الشهري",type:"number",value:c.amount||"",attrs:'min="0"'},{id:"dueDay",label:"يوم الدفع في الشهر",type:"number",value:c.dueDay||1,attrs:'min="1" max="28"'}],async v=>{ await updateDoc(doc(db,"houses",S.hid),{jarCfg:{amount:C.r2(v.amount),dueDay:Math.min(28,Math.max(1,+v.dueDay||1))}}); toast("اتحفظ"); }); }
+    case "weekPrev": S.weekOff=(S.weekOff||0)+1; return render();
+    case "weekNext": S.weekOff=Math.max(0,(S.weekOff||0)-1); return render();
     case "goSettings": return go("settings");
     case "addExp": return expModal();
     case "editExp": return E&&expModal(E);
