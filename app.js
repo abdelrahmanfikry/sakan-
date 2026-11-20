@@ -6,6 +6,11 @@ import * as C from "./core.js?v=6";
 const { esc, r2, today, monthOf, monthName, iso, fmtDT, safeUrl, waPhone, icon, FUND } = C;
 
 const root = document.getElementById("root");
+// فتح «مصروف سريع» مباشرة: من اختصار الأيقونة (?quick=1) أو #quick أو من «مشاركة» رسالة للتطبيق
+let pendingFast=null;
+{ const qs=new URLSearchParams(location.search); const shared=[qs.get("title"),qs.get("text"),qs.get("url")].filter(Boolean).join("\n").trim();
+  if(shared) pendingFast={text:shared}; else if(qs.has("quick")||location.hash==="#quick") pendingFast={text:""};
+  if(pendingFast) history.replaceState(null,"",location.pathname); }
 const configured = firebaseConfig && firebaseConfig.apiKey && !/PASTE|ضع/i.test(firebaseConfig.apiKey);
 
 /* ---------------- theme ---------------- */
@@ -61,7 +66,7 @@ async function deleteDoc(ref){ const info=auditInfo(ref); const b=info?beforeOf(
 async function setDoc(ref,d,o){ const info=auditInfo(ref); const b=info?beforeOf(info.col,info.id):null; await fbSet(ref,d,o); if(info) audit(b?"update":"create",info,b,d); }
 
 /* ---------------- state ---------------- */
-const LISTS=["users","roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","audit","closings","prices","jar","bookings"];
+const LISTS=["users","roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","audit","closings","prices","jar","bookings","claims"];
 const S = { user:null, memberships:{}, hid:null, house:null, users:{}, roster:[], expenses:[], payments:[], fund:[], shopping:[], chores:[], notes:[], polls:[], meters:[], items:[], contacts:[],
   guests:[], loans:[], audit:[], closings:[], prices:[], jar:[], bookings:[], weekOff:0, bk:{res:"",day:0}, autoRec:new Set(), seenBefore:null,
   loaded:{}, unsubs:[], view:"home", f:{month:"",cat:"",mem:"",q:""}, showBought:false, dirty:false, booting:true };
@@ -114,7 +119,7 @@ async function login(){ const p=new GoogleAuthProvider(); p.setCustomParameters(
 function joinCodeFromHash(){ const m=location.hash.match(/join[=-]([A-Z0-9]{6})/i); return m?m[1].toUpperCase():null; }
 
 /* ---------------- house subscriptions ---------------- */
-function stopHouse(){ S.unsubs.forEach(f=>f()); S.unsubs=[]; S.loaded={}; LISTS.forEach(k=>S[k]= k==="users"?{}:[]); S.house=null; }
+function stopHouse(){ S.unsubs.forEach(f=>f()); S.unsubs=[]; S.loaded={}; S.claimsSynced=false; LISTS.forEach(k=>S[k]= k==="users"?{}:[]); S.house=null; }
 function openHouse(hid){
   stopHouse(); S.hid=hid; store.set("sakan-house",hid); S.booting=true; render();
   if(S.user&&S.prefs?.lastHouse!==hid) fbSet(doc(db,"memberships",S.user.uid),{prefs:{lastHouse:hid}},{merge:true}).catch(()=>{});
@@ -124,7 +129,7 @@ function openHouse(hid){
   S.unsubs.push(onSnapshot(collection(db,"houses",hid,"users"), s=>{ S.users={}; s.docs.forEach(d=>S.users[d.id]=d.data()); done("users");
     if(S.user && !S.users[S.user.uid] && S.loaded.house===true){ leaveLocal(hid); } }, err("users")));
   const sorters={roster:(a,b)=>(a.order??0)-(b.order??0)};
-  ["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar","bookings"].forEach(k=>
+  ["roster","expenses","payments","fund","shopping","chores","notes","polls","meters","items","contacts","guests","loans","closings","prices","jar","bookings","claims"].forEach(k=>
     S.unsubs.push(onSnapshot(collection(db,"houses",hid,k), s=>{ S[k]=s.docs.map(d=>({id:d.id,...d.data()})); sorters[k]&&S[k].sort(sorters[k]); done(k); }, err(k))));
   S.unsubs.push(onSnapshot(query(collection(db,"houses",hid,"audit"),orderBy("at","desc"),limit(300)), s=>{ S.audit=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||"").localeCompare(a.at||"")); done("audit"); }, err("audit")));
 }
@@ -240,7 +245,7 @@ function viewHtml(){
 /* ---------------- shared bits ---------------- */
 function linkBanner(){
   if(myMember() || !S.roster.length || !canWrite()) return "";
-  const taken=new Set(Object.values(S.users).map(u=>u.memberId).filter(Boolean));
+  const taken=new Set([...Object.values(S.users).map(u=>u.memberId).filter(Boolean),...(S.claims||[]).map(c=>c.id)]);
   const opts=active().filter(m=>!taken.has(m.id)).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("");
   return `<div class="card"><div class="card-head"><h2 class="h">انت مين في السكن؟</h2></div><p class="sub" style="margin:0 0 12px">اختار اسمك علشان تسجّل مصاريفك ودفعاتك وتشوف رصيدك.</p>
   ${opts?`<div class="actions"><select id="linkSel" style="max-width:280px">${opts}</select><button class="btn primary" data-act="link">ده أنا</button></div>`:`<div class="notice">كل الأسماء مربوطة. اطلب من المدير يضيف اسمك.</div>`}</div>`;
@@ -541,7 +546,7 @@ function importData(d,isRestore){
     if(isRestore) BK_HOUSE.forEach(k=>{ if(hs[k]!==undefined&&k!=="name") patch[k]=hs[k]; });
     const cl=d.categories||hs.categories; if(!isRestore&&Array.isArray(cl)&&cl.length) patch.categories=[...new Set([...(S.house.categories||[]),...cl])];
     if(Object.keys(patch).length) await updateDoc(doc(db,"houses",S.hid),patch);
-    if(d.me&&!myMember()) await updateDoc(H("users",uid),{memberId:d.me});
+    if(d.me&&!myMember()) await linkMember(uid,d.me);
     await fbAdd(collection(db,"houses",S.hid,"audit"),{at:iso(),uid,action:"create",col:"import",refId:isRestore?"restore":"import",before:null,after:{title:`${isRestore?"استرجاع نسخة":"استيراد"}: ${n("roster")} ساكن و${n("expenses")} مصروف (${money(tot)}) و${n("payments")} تحويل`}});
   },isRestore?"النسخة اترجّعت":"اتستوردت البيانات"),isRestore?"اللي في النسخة هيرجع زي ما كان، والحاجات اللي اتضافت بعدها هتفضل. هتتعمل نسخة من الوضع الحالي الأول.":"البيانات هتتضاف على اللي موجود في السكن.");
 }
@@ -765,7 +770,30 @@ function autoRecurring(){
     setDoc(H("expenses",id),{title:r.title,amount:r2(r.amount),category:r.category,paidBy:r.paidBy,date,month:m,split:{mode:r.mode,members:active().map(x=>x.id)},note:"بند شهري ثابت — اتضاف تلقائيًا",recurring:true,receiptId:null,createdBy:S.user.uid,createdAt:iso()})
       .then(()=>toast(`اتضاف «${r.title}» تلقائيًا`)).catch(e=>console.warn(e)); }
 }
-function afterData(){ if(!S.user||!S.hid||!S.house) return; if(!["house","users","roster","expenses","payments"].every(k=>S.loaded[k])) return; autoRecurring(); sysNotify(); touchActive(); autoBackup(false); }
+function afterData(){ if(!S.user||!S.hid||!S.house) return; if(!["house","users","roster","expenses","payments"].every(k=>S.loaded[k])) return; autoRecurring(); sysNotify(); touchActive(); syncClaims();
+  if(pendingFast&&!document.querySelector("#modalRoot .overlay")){ const p=pendingFast; pendingFast=null; fastExp(p.text); } autoBackup(false); }
+/* ربط الحساب باسم ساكن — الاسم بيتحجز في claims في نفس العملية (القواعد بتمنع الانتحال) */
+const claimOf = mid => (S.claims||[]).find(c=>c.id===mid);
+async function linkMember(uid,mid){
+  const old=S.users[uid]?.memberId||null; if(old===mid) return;
+  const bt=writeBatch(db);
+  if(old&&claimOf(old)?.uid===uid) bt.delete(H("claims",old));
+  if(mid) bt.set(H("claims",mid),{uid,at:iso()});
+  bt.update(H("users",uid),{memberId:mid});
+  await bt.commit();
+}
+async function unlinkAndRemove(uid){
+  const mid=S.users[uid]?.memberId; const bt=writeBatch(db);
+  if(mid&&claimOf(mid)?.uid===uid) bt.delete(H("claims",mid));
+  bt.delete(H("users",uid)); await bt.commit();
+}
+// للبيانات القديمة: المدير بيحجز الأسماء المربوطة قبل التحديث
+function syncClaims(){
+  if(S.claimsSynced||!isAdmin()||!S.loaded.claims) return; S.claimsSynced=true;
+  const miss=Object.entries(S.users).filter(([u,x])=>x.memberId&&!claimOf(x.memberId)); if(!miss.length) return;
+  const bt=writeBatch(db), seen=new Set(); miss.forEach(([u,x])=>{ if(seen.has(x.memberId)) return; seen.add(x.memberId); bt.set(H("claims",x.memberId),{uid:u,at:iso()}); });
+  bt.commit().catch(e=>console.error("claims",e));
+}
 function touchActive(){ if(S.activeTouched||!S.users[S.user.uid]) return; S.activeTouched=true; const la=me().lastActive||""; if(la&&Date.now()-new Date(la)<10*60e3) return;
   const ua=navigator.userAgent; const device=/iPhone|iPad/.test(ua)?"آيفون":/Android/.test(ua)?"أندرويد":/Windows/.test(ua)?"ويندوز":/Mac/.test(ua)?"ماك":"جهاز تاني";
   updateDoc(H("users",S.user.uid),{lastActive:iso(),device}).catch(()=>{}); }
@@ -1017,8 +1045,56 @@ function inviteModal(){
    <div class="payinfo"><code>${esc(link)}</code></div>
    <div class="mfoot"><button class="btn primary" data-copy="${esc(link)}" data-msg="اتنسخ اللينك">${icon("copy")} انسخ اللينك</button><a class="btn" href="https://wa.me/?text=${encodeURIComponent(`انضم لحسابات ${S.house.name} على سكن: ${link}`)}" target="_blank" rel="noopener noreferrer">${icon("wa")} ابعت واتساب</a><button class="btn" data-close>تمام</button></div>`);
 }
+/* ---------------- مصروف سريع: مبلغ + فئة، أو رسالة كل سطر فيها مصروف ---------------- */
+const fastPayer = () => myMember() || (isAdmin()?active()[0]?.id:null);
+function fastCats(){ const cnt={}; S.expenses.filter(e=>e.createdBy===S.user.uid).forEach(e=>cnt[e.category]=(cnt[e.category]||0)+1);
+  return [...cats()].sort((a,b)=>(cnt[b]||0)-(cnt[a]||0)); }
+function fastLine(t){
+  const r=C.parseQuick(t,S.roster,myMember()); const tk=C.norm(t).split(/\s+/).map(x=>x.replace(/ء$/,""));
+  const direct=cats().find(c=>tk.includes(C.norm(c).replace(/ء$/,""))||tk.includes(C.norm(c).replace(/^ال/,"")));
+  r.category=direct||mapCat(r.category); r.paidBy=r.paidBy||fastPayer();
+  r.err=!(r.amount>0)?"مفيش مبلغ":(!isAdmin()&&r.paidBy!==myMember()&&!PM("expOthers"))?"مش مسموح تسجّل باسم غيرك":"";
+  return r; }
+function saveFast(list){
+  const date=today();
+  // من غير انتظار السيرفر: بيتسجّل محليًا فورًا ويتزامن لوحده حتى لو مفيش نت
+  return Promise.all(list.map(r=>addDoc(HC("expenses"),{title:r.title,amount:r2(r.amount),date,month:monthOf(date),category:r.category,paidBy:r.paidBy,
+    split:{mode:"equal",members:r.members?.length?r.members:active().map(m=>m.id)},note:"",receiptId:null,noGuests:false,recurring:false,createdBy:S.user.uid,createdAt:iso()}))).catch(fail); }
+function fastExp(text){
+  if(!canAddExp()) return toast(S.roster.length?"اختار اسمك الأول من «الأعضاء»":"المدير لازم يضيف السكان الأول");
+  if(locked(today())&&!isAdmin()) return toast("الشهر ده مقفول");
+  const cl=fastCats(); let cat=cl[0]||"أخرى";
+  modal(`<h3>${icon("receipt")} مصروف سريع<button class="btn icon ghost" data-close>${icon("x")}</button></h3>
+   <div class="seg" style="margin-bottom:12px"><button type="button" data-fm="amt">بالمبلغ</button><button type="button" data-fm="msg">برسالة</button></div>
+   <div id="fAmtBox"><input id="fAmt" type="text" inputmode="decimal" placeholder="المبلغ" autocomplete="off" style="font-size:1.8rem;text-align:center;font-weight:700">
+     <input id="fTitle" placeholder="على إيه؟ (اختياري)" maxlength="80" style="margin-top:8px">
+     <div class="actions" id="fCats" style="margin-top:10px;flex-wrap:wrap"></div>
+     <p class="tiny" style="margin:10px 0 0">النهارده · دفعها ${esc(mName(fastPayer()))} · متقسمة على الكل</p></div>
+   <div id="fMsgBox" hidden><textarea id="fMsg" rows="5" placeholder="كل سطر مصروف، مثلًا:&#10;عيش 20&#10;فراخ 180&#10;أحمد دفع 300 نت على الكل"></textarea><div id="fPrev" class="list" style="margin-top:8px"></div></div>
+   <div class="mfoot"><button class="btn primary" id="fSave">سجّل</button><button class="btn" id="fMore">تفاصيل أكتر</button><button class="btn ghost" id="fAll">${icon("plus")} إضافات تانية</button></div>`,ov=>{
+    const $=q=>ov.querySelector(q); let mode=text?"msg":"amt", lines=[];
+    const setMode=m=>{ mode=m; ov.querySelectorAll("[data-fm]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.fm===m)); $("#fAmtBox").hidden=m!=="amt"; $("#fMsgBox").hidden=m!=="msg"; $("#fMore").hidden=m!=="amt"; (m==="amt"?$("#fAmt"):$("#fMsg")).focus(); prev(); };
+    const drawCats=()=>{ $("#fCats").innerHTML=cl.slice(0,8).map(c=>`<button type="button" class="btn sm ${c===cat?"primary":""}" data-fc="${esc(c)}">${esc(c)}</button>`).join(""); };
+    const prev=()=>{ if(mode!=="msg") return; lines=$("#fMsg").value.split(/\n+/).map(t=>t.trim()).filter(Boolean).map(fastLine); const ok=lines.filter(r=>!r.err);
+      $("#fPrev").innerHTML=lines.map(r=>`<div class="row-item"><div class="grow"><b>${esc(r.title)}</b><div class="tiny">${esc(r.category)} · ${esc(mName(r.paidBy))} · على ${r.members.length}</div></div>${r.err?`<span class="chip neg">${esc(r.err)}</span>`:`<span class="amt">${money(r.amount)}</span>`}</div>`).join("");
+      $("#fSave").textContent=ok.length>1?`سجّل ${ok.length} مصاريف (${money(ok.reduce((a,r)=>a+r.amount,0))})`:"سجّل"; };
+    const save=()=>{
+      if(mode==="amt"){ const amount=r2(C.norm($("#fAmt").value).replace(",",".")); if(!(amount>0)) return toast("اكتب المبلغ");
+        saveFast([{title:$("#fTitle").value.trim()||cat,amount,category:cat,paidBy:fastPayer()}]); closeModal(); return toast(`اتسجّل ${money(amount)} ✓`); }
+      const ok=lines.filter(r=>!r.err); if(!ok.length) return toast("مفيش سطر فيه مبلغ صح");
+      saveFast(ok); closeModal(); toast(`اتسجّل ${ok.length} مصروف ✓`+(lines.length>ok.length?` — ${lines.length-ok.length} اتساب`:"")); };
+    ov.querySelectorAll("[data-fm]").forEach(b=>b.onclick=()=>setMode(b.dataset.fm));
+    $("#fCats").onclick=e=>{ const b=e.target.closest("[data-fc]"); if(!b) return; cat=b.dataset.fc; drawCats(); $("#fAmt").focus(); };
+    $("#fMsg").oninput=prev; $("#fSave").onclick=save;
+    [$("#fAmt"),$("#fTitle")].forEach(i=>i.onkeydown=e=>{ if(e.key==="Enter") save(); });
+    $("#fMsg").onkeydown=e=>{ if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)) save(); };
+    $("#fMore").onclick=()=>{ const a=r2(C.norm($("#fAmt").value)); const t=$("#fTitle").value.trim(); closeModal(); expModal(null,{title:t||cat,amount:a||"",category:cat}); };
+    $("#fAll").onclick=()=>{ closeModal(); quickSheet(); };
+    if(text) $("#fMsg").value=text; drawCats(); setMode(mode);
+  });
+}
 function quickSheet(){
-  const opts=[["qaSheet","sparkle","اكتب جملة",F("quickAdd")&&canAddExp()],["addExp","receipt","مصروف",canAddExp()],["addPay","swap","دفعة",F("payments")&&canAddExp()],["addFund","piggy","اشتراك صندوق",F("fund")&&canWrite()&&(isAdmin()||PM("memberFund"))&&myMember()],
+  const opts=[["fast","receipt","مصروف سريع",canAddExp()],["qaSheet","sparkle","اكتب جملة",F("quickAdd")&&canAddExp()],["addExp","receipt","مصروف",canAddExp()],["addPay","swap","دفعة",F("payments")&&canAddExp()],["addFund","piggy","اشتراك صندوق",F("fund")&&canWrite()&&(isAdmin()||PM("memberFund"))&&myMember()],
     ["addBook","washer","احجز",F("booking")&&canWrite()&&!!myMember()],["addPrice","tag","سعر حاجة",F("prices")&&canWrite()],["addJar","piggy","حط في الحصالة",F("rentJar")&&canWrite()&&!!myMember()&&+(jarCfg().amount)>0],["quickShop","cart","حاجة ناقصة",F("shopping")&&canWrite()&&(isAdmin()||PM("memberShopping"))],["addMeter","bolt","قراية عداد",F("meters")&&canWrite()&&(isAdmin()||PM("memberMeters"))],["addPoll","poll","تصويت",F("polls")&&canWrite()&&(isAdmin()||PM("memberPolls"))]].filter(o=>o[3]);
   modal(`<h3>إضافة سريعة<button class="btn icon ghost" data-close>${icon("x")}</button></h3><div class="sheet-grid">${opts.map(([a,ic,l])=>`<button data-qa="${a}"><span class="ic-round acc">${icon(ic)}</span>${l}</button>`).join("")}</div>`,ov=>{
     ov.querySelector(".sheet-grid").onclick=e=>{ const b=e.target.closest("[data-qa]"); if(!b) return; closeModal(); handle(b.dataset.qa,b); }; });
@@ -1058,7 +1134,7 @@ function bindView(){
   c.querySelectorAll("[data-perm]").forEach(i=>i.onchange=()=>upHouse({["perms."+i.dataset.perm]:i.checked},"اتحفظت الصلاحية"));
   c.querySelectorAll("[data-lock]").forEach(i=>i.onchange=()=>{ const s=new Set(S.house.lockedMonths||[]); i.checked?s.add(i.dataset.lock):s.delete(i.dataset.lock); upHouse({lockedMonths:[...s]},i.checked?"الشهر اتقفل":"الشهر اتفتح"); });
   c.querySelectorAll("[data-role]").forEach(s=>s.onchange=async()=>{ try{ await updateDoc(H("users",s.dataset.role),{role:s.value}); toast("اتغيّر الدور"); }catch(e){ fail(e); } });
-  c.querySelectorAll("[data-bind]").forEach(s=>s.onchange=async()=>{ try{ await updateDoc(H("users",s.dataset.bind),{memberId:s.value||null}); toast("اتحفظ"); }catch(e){ fail(e); } });
+  c.querySelectorAll("[data-bind]").forEach(s=>s.onchange=async()=>{ try{ await linkMember(s.dataset.bind,s.value||null); toast("اتحفظ"); }catch(e){ fail(e); } });
 }
 async function upHouse(patch,msg){ try{ await updateDoc(doc(db,"houses",S.hid),patch); msg&&toast(msg); }catch(e){ fail(e); } }
 document.addEventListener("focusout",()=>{ setTimeout(()=>{ if(S.dirty && !document.querySelector("#modalRoot .overlay")){ const ae=document.activeElement; if(!(ae&&ae.closest&&ae.closest("#content")&&/INPUT|TEXTAREA/.test(ae.tagName)&&ae.value)){ S.dirty=false; render(); } } },50); });
@@ -1093,7 +1169,8 @@ function handle(a,b={dataset:{}}){
     case "personView": S.f.person=b.dataset.id; return render();
     case "newHouse": return renderNoHouse();
     case "logout": return signOut(auth);
-    case "quick": return quickSheet();
+    case "quick": return canAddExp()?fastExp():quickSheet();
+    case "fast": return fastExp();
     case "more": return moreSheet();
     case "addBook": return myMember()?bookModal():toast("اختار اسمك الأول");
     case "bookNow": { const r=resList().find(x=>x.id===S.bk.res)||resList()[0]; const b={res:r.id,date:today(),start:nowHM()}; b.end=C.fromMin(Math.min(24*60-1,C.toMin(b.start)+(+r.slot||60)));
@@ -1130,12 +1207,12 @@ function handle(a,b={dataset:{}}){
     case "summary": { const t=summaryText(); return modal(`<h3>ملخص الشهر<button class="btn icon ghost" data-close>${icon("x")}</button></h3><textarea rows="12" readonly>${esc(t)}</textarea><div class="mfoot"><button class="btn primary" data-copy="${esc(t)}">${icon("copy")} نسخ</button><a class="btn" href="https://wa.me/?text=${encodeURIComponent(t)}" target="_blank" rel="noopener noreferrer">${icon("wa")} واتساب</a></div>`); }
     case "addMem": return memModal();
     case "editMem": return M&&memModal(M);
-    case "link": { const v=document.getElementById("linkSel")?.value; return v&&run(()=>updateDoc(H("users",S.user.uid),{memberId:v}),"أهلًا يا "+mName(v)); }
+    case "link": { const v=document.getElementById("linkSel")?.value; return v&&run(()=>linkMember(S.user.uid,v),"أهلًا يا "+mName(v)); }
     case "saveMyPay": { const ins=document.getElementById("myInsta").value.trim(); if(ins&&!safeUrl(ins)) return toast("اللينك لازم يبدأ بـ https://");
       return run(()=>updateDoc(H("users",S.user.uid),{instapay:ins,ipa:document.getElementById("myIpa").value.trim(),wallet:document.getElementById("myWallet").value.trim(),phone:document.getElementById("myPhone").value.trim()}),"اتحفظت بيانات الدفع"); }
     case "invite": return inviteModal();
     case "newCode": return confirmBox("تعمل كود دعوة جديد؟","كود جديد",()=>run(async()=>{ const c=C.code6(), old=S.house.joinCode; const bt=writeBatch(db); bt.set(doc(db,"codes",c),{hid:S.hid}); bt.update(doc(db,"houses",S.hid),{joinCode:c}); if(old) bt.delete(doc(db,"codes",old)); await bt.commit(); },"اتعمل كود جديد"),"الكود القديم مش هيشتغل تاني.");
-    case "kick": { const u=S.users[id]; return confirmBox(`إخراج ${u?.name||"المستخدم"} من السكن؟`,"إخراج",()=>run(()=>deleteDoc(H("users",id)),"اتشال"),"حساباته في الجداول بتفضل زي ما هي."); }
+    case "kick": { const u=S.users[id]; return confirmBox(`إخراج ${u?.name||"المستخدم"} من السكن؟`,"إخراج",()=>run(()=>unlinkAndRemove(id),"اتشال"),"حساباته في الجداول بتفضل زي ما هي."); }
     case "saveHouse": { const n=document.getElementById("sName").value.trim(); if(!n) return toast("اكتب الاسم"); return run(async()=>{ await updateDoc(doc(db,"houses",S.hid),{name:n,currency:document.getElementById("sCur").value}); await setDoc(doc(db,"memberships",S.user.uid),{houses:{[S.hid]:n}},{merge:true}); },"اتحفظ"); }
     case "saveBudgets": { const o={}; document.querySelectorAll("[data-budget]").forEach(i=>{ if(+i.value>0) o[i.dataset.budget]=+i.value; }); return upHouse({budgets:o},"اتحفظت الميزانية"); }
     case "saveMeters": { const o={}; document.querySelectorAll("[data-mp]").forEach(i=>{ o[i.dataset.mp]=o[i.dataset.mp]||{}; o[i.dataset.mp][i.dataset.k]=+i.value||0; }); return upHouse({meterPrices:o},"اتحفظت الأسعار"); }
@@ -1208,7 +1285,7 @@ function handle(a,b={dataset:{}}){
     case "backupNow": return autoBackup(true);
     case "bkDownload": return (async()=>{ try{ const s2=await getDoc(H("backups",id)); if(!s2.exists()) return toast("النسخة مش موجودة"); download(`sakan-backup-${id.slice(0,10)}.json`,s2.data().data,"application/json"); }catch(e){ fail(e); } })();
     case "bkRestore": return (async()=>{ try{ const s2=await getDoc(H("backups",id)); if(!s2.exists()) return toast("النسخة مش موجودة"); importData(JSON.parse(s2.data().data),true); }catch(e){ fail(e); } })();
-    case "leave": return confirmBox("تخرج من السكن ده؟","خروج",()=>run(async()=>{ await deleteDoc(H("users",S.user.uid)); await setDoc(doc(db,"memberships",S.user.uid),{houses:{[S.hid]:deleteField()}},{merge:true}); S.hid=null; },"خرجت من السكن"));
+    case "leave": return confirmBox("تخرج من السكن ده؟","خروج",()=>run(async()=>{ await unlinkAndRemove(S.user.uid); await setDoc(doc(db,"memberships",S.user.uid),{houses:{[S.hid]:deleteField()}},{merge:true}); S.hid=null; },"خرجت من السكن"));
     case "deleteHouse": return confirmBox("حذف السكن نهائيًا؟","احذف السكن",()=>run(async()=>{ const hid=S.hid; await setDoc(doc(db,"memberships",S.user.uid),{houses:{[hid]:deleteField()}},{merge:true}); if(S.house.joinCode) await deleteDoc(doc(db,"codes",S.house.joinCode)).catch(()=>{}); await deleteDoc(doc(db,"houses",hid)); S.hid=null; },"اتحذف السكن"),"نزّل نسخة احتياطية الأول. السكان التانيين هيتشالوا من السكن.");
   }
 }
