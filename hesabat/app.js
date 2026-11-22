@@ -50,14 +50,25 @@ function guessCat(text, type){ const t = norm(text).split(/\s+/).map(w => w.repl
   if (type === "income") return INCOME_CATS.find(c => t.includes(norm(c))) || null;
   const own = cats().find(c => t.includes(norm(c).replace(/^ال/, ""))); if (own) return own;
   for (const [c, ws] of Object.entries(WORDS)) if (cats().includes(c) && t.some(w => ws.includes(w))) return c; return null; }
+const LOAN_LBL = { lent: "سلّفت", borrowed: "استلفت من", got_back: "رجّعلي", paid_back: "رجّعت لـ" };
+const loanTitle = (d, p) => d === "got_back" ? `${p} رجّعلي` : `${LOAN_LBL[d]} ${p}`;
+const LOAN_RX = [["lent", /(^|\s)(سلفت|سلفته|اديته سلفه)(\s|$)/], ["borrowed", /(^|\s)(استلفت|اتسلفت|خدت سلفه)(\s|$)/], ["got_back", /(رجعلي|رجع لي|ردلي|رد لي|سددلي|سدد لي)/], ["paid_back", /(^|\s)(رجعت ل\S+|رجعتله|رجعتلها|سددت|رديت)(\s|$)/]];
+const LOAN_WORDS = new Set(["سلفت","سلفته","اديته","سلفه","استلفت","اتسلفت","خدت","رجعلي","رجع","لي","ردلي","رد","سددلي","سدد","رجعت","سددت","رديت","من","ل"]);
 function parseLine(line){
-  const raw = line.trim(); const n = norm(raw);
+  const raw = line.trim(); const n = norm(raw), words = n.split(/\s+/);
+  const wl = wallets().find(w => words.includes(norm(w.name)));
+  const dir = (LOAN_RX.find(([, rx]) => rx.test(n)) || [])[0];
+  if (dir) { const m = n.match(/\d+(?:[.,]\d+)*/), amount = m ? toNum(m[0]) : 0, known = Object.keys(debts()).map(norm);
+    const person = raw.split(/\s+/).filter(w => { const x = norm(w); return x && !LOAN_WORDS.has(x) && !STOP.has(x) && !/^\d+([.,]\d+)*$/.test(x) && !(wl && x === norm(wl.name)); })
+      .map(w => { const x = norm(w); return x.startsWith("ل") && (known.includes(x.slice(1)) || x.length >= 5) && !known.includes(x) ? w.slice(1) : w; }).join(" ").trim();
+    const date = /(^|\s)(امبارح|امس)(\s|$)/.test(n) ? yesterday() : today();
+    return { amount, date, type: "loan", dir, person: person || "؟", title: loanTitle(dir, person || "؟"), category: "سلف", wallet: wl?.id, err: !(amount > 0) ? "مفيش مبلغ" : !person ? "مين؟" : "" }; }
   const m = n.match(/\d+(?:[.,]\d+)*/); const amount = m ? toNum(m[0]) : 0;
   const date = /(^|\s)(امبارح|امس)(\s|$)/.test(n) ? yesterday() : today();
   const type = INCOME_WORDS.some(w => n.includes(w)) || /^\+/.test(raw) ? "income" : "expense";
   const title = raw.replace(/^\+/, "").split(/\s+/).filter(w => { const x = norm(w); return x && !STOP.has(x) && !/^\d+([.,]\d+)*$/.test(x); }).join(" ").trim();
   const category = guessCat(raw, type) || (type === "income" ? "أخرى" : "أخرى");
-  return { amount, date, type, title: title || category, category, err: amount > 0 ? "" : "مفيش مبلغ" };
+  return { amount, date, type, title: (wl ? title.split(/\s+/).filter(w => norm(w) !== norm(wl.name)).join(" ") : title) || category, category, wallet: wl?.id, err: amount > 0 ? "" : "مفيش مبلغ" };
 }
 
 /* ================= الحالة ================= */
@@ -69,7 +80,19 @@ const S = { user: null, items: [], cfg: {}, loaded: false, view: "home", unsubs:
 const col = () => collection(db, "ledgers", S.user.uid, "items");
 const cfgRef = () => doc(db, "ledgers", S.user.uid);
 const saveCfg = patch => { S.cfg = { ...S.cfg, ...patch }; return setDoc(cfgRef(), patch, { merge: true }).catch(e => { console.error(e); toast("ما اتحفظش"); }); };
-const expenses = () => S.items.filter(i => i.type !== "income");
+const expenses = () => S.items.filter(i => !i.type || i.type === "expense");
+/* حسابات الفلوس (كاش، فيزا، إنستاباي…): الرصيد = رصيد البداية + الداخل − الخارج */
+const wallets = () => S.cfg.wallets?.length ? S.cfg.wallets : [{ id: "cash", name: "كاش", opening: 0 }];
+const wName = id => (wallets().find(w => w.id === (id || "cash")) || { name: "حساب محذوف" }).name;
+const defWallet = () => { const w = store.get("h-wallet"); return wallets().some(x => x.id === w) ? w : wallets()[0].id; };
+const LOAN_SIGN = { lent: -1, borrowed: 1, got_back: 1, paid_back: -1 };
+function walletDelta(i, wid){ const w = i.wallet || "cash";
+  if (i.type === "transfer") return (i.to === wid ? i.amount : 0) - (w === wid ? i.amount : 0);
+  if (w !== wid) return 0; if (i.type === "income") return i.amount; if (i.type === "loan") return (LOAN_SIGN[i.dir] || 0) * i.amount; return -i.amount; }
+const balance = wid => r2((+(wallets().find(w => w.id === wid) || {}).opening || 0) + S.items.reduce((t, i) => t + walletDelta(i, wid), 0));
+/* السلف: موجب = ليك عنده · سالب = عليك ليه */
+function debts(){ const o = {}; S.items.filter(i => i.type === "loan").forEach(i => { const p = (i.person || "؟").trim(); o[p] = o[p] || { net: 0, items: [] };
+  o[p].net = r2(o[p].net + (i.dir === "lent" || i.dir === "paid_back" ? 1 : -1) * i.amount); o[p].items.push(i); }); return o; }
 const incomes = () => S.items.filter(i => i.type === "income");
 const inMonth = (list, m) => list.filter(i => i.month === m);
 
@@ -108,14 +131,14 @@ function renderLogin(){
 }
 
 /* ================= الهيكل ================= */
-const NAV = [["home","سجّل","＋"],["summary","اللوحة","◔"],["statement","كشف حساب","☰"],["months","الشهور","▥"],["settings","الإعدادات","⚙"]];
+const NAV = [["home","سجّل","＋"],["summary","اللوحة","◔"],["money","الفلوس","◈"],["statement","الكشف","☰"],["months","الشهور","▥"],["settings","ضبط","⚙"]];
 function render(){
   if (!S.user) return;
   const ae = document.activeElement;
   if (ae && root.contains(ae) && /INPUT|TEXTAREA|SELECT/.test(ae.tagName) && ae.closest("[data-keep]")) { renderData(); return; }
   const u = S.user;
   root.innerHTML = `<div class="wrap">
-   <header class="top"><div class="logo">ح</div><h1>${esc(S.view === "home" ? "حسابات" : NAV.find(n => n[0] === S.view)[1])}</h1>
+   <header class="top"><div class="logo">ح</div><h1>${esc(({ home: "حسابات", summary: "لوحة التحكم", money: "الفلوس والسلف", statement: "كشف حساب", months: "الشهور", settings: "الإعدادات" })[S.view])}</h1>
      <button class="icon-btn" id="theme" aria-label="تبديل الوضع">${isDark() ? "☀️" : "🌙"}</button>
      <img class="avatar" alt="" src="${esc(u.photoURL || "")}" referrerpolicy="no-referrer" onerror="this.style.visibility='hidden'"></header>
    <main id="view">${S.view === "home" ? homeShell() : ""}<div id="data"></div></main>
@@ -128,18 +151,19 @@ function render(){
   if (S.view === "home") bindAdd(root.querySelector("#add"));
   renderData();
 }
-function go(v, patch){ S.view = v; if (patch) Object.assign(S.st, patch); render(); scrollTo({ top: 0 }); }
+function go(v, patch){ S.view = v; if (patch) Object.assign(S.st, { wallet: "" }, patch); render(); scrollTo({ top: 0 }); }
 function renderData(){
   const box = root.querySelector("#data"); if (!box) return;
   if (!S.loaded) { box.innerHTML = `<div class="card"><p class="empty">جاري التحميل…</p></div>`; return; }
-  ({ home: homeData, summary, statement, months, settings })[S.view](box);
+  ({ home: homeData, summary, money: money_, statement, months, settings })[S.view](box);
 }
 
 /* ================= الإضافة (في الرئيسية أو كنافذة) ================= */
 function addForm(){ return `<div class="seg" data-seg><button data-t="expense">مصروف</button><button data-t="income">دخل</button><button data-t="msg">برسالة</button></div>
   <div data-amt><input class="amt-in" data-in="amt" inputmode="decimal" autocomplete="off" placeholder="0">
     <input data-in="ttl" placeholder="على إيه؟ (اختياري)" maxlength="80" style="margin-top:8px">
-    <div class="chips" data-cats></div></div>
+    <div class="chips" data-cats></div>
+    <div class="wpick" data-wp></div></div>
   <div data-msg hidden><textarea data-in="msg" rows="5" placeholder="كل سطر حاجة، مثلًا:&#10;عيش 20&#10;أوبر ٨٥&#10;صيدلية 140 امبارح&#10;مرتب 15000"></textarea><div class="prev" data-prev></div></div>
   <button class="btn primary" data-save>سجّل</button><p class="tiny center-t" data-hint></p>`; }
 function homeShell(){ return `<section class="card" id="add" data-keep>${addForm()}</section>`; }
@@ -152,12 +176,13 @@ function bindAdd(box, after){
   const setMode = m => { if (m === "msg") A.mode = "msg"; else { A.mode = "amt"; A.type = m; }
     box.querySelectorAll("[data-t]").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === (A.mode === "msg" ? "msg" : A.type)));
     $("[data-amt]").hidden = A.mode !== "amt"; $("[data-msg]").hidden = A.mode !== "msg";
-    $("[data-hint]").textContent = A.mode === "amt" ? "بيتسجّل بتاريخ النهارده" : "«امبارح» في السطر = تاريخ امبارح · «مرتب» أو + في الأول = دخل";
+    $("[data-hint]").textContent = A.mode === "amt" ? "بيتسجّل بتاريخ النهارده" : "«امبارح» = تاريخ امبارح · «مرتب» = دخل · «سلفت أحمد 200» = سلفة · اسم الحساب (فيزا) = اتدفع منه";
     $("[data-in=amt]").placeholder = A.type === "income" ? "الدخل" : "0"; $(".btn.primary").classList.toggle("inc", A.mode === "amt" && A.type === "income");
-    drawCats(); preview(); (A.mode === "amt" ? $("[data-in=amt]") : $("[data-in=msg]")).focus(); };
+    drawCats(); drawW(); preview(); (A.mode === "amt" ? $("[data-in=amt]") : $("[data-in=msg]")).focus(); };
+  const drawW = () => { const ws = wallets(); $("[data-wp]").innerHTML = ws.length > 1 ? `<span class="tiny">${A.type === "income" ? "دخل على" : "اتدفع من"}:</span>` + ws.map(w => `<button class="chip sm" data-w="${esc(w.id)}" aria-pressed="${w.id === defWallet()}">${esc(w.name)}</button>`).join("") : ""; };
   const preview = () => { if (A.mode !== "msg") { $("[data-save]").textContent = A.type === "income" ? "سجّل الدخل" : "سجّل"; return; }
     lines = $("[data-in=msg]").value.split(/\n+/).map(t => t.trim()).filter(Boolean).map(parseLine); const ok = lines.filter(l => !l.err);
-    $("[data-prev]").innerHTML = lines.map(l => `<div class="row"><div class="grow"><b>${esc(l.title)}</b><span class="tiny">${l.type === "income" ? "دخل · " : ""}${esc(l.category)}${l.date !== today() ? " · امبارح" : ""}</span></div>${l.err ? `<span class="val bad">${esc(l.err)}</span>` : `<span class="val ${l.type === "income" ? "pos" : ""}">${money(l.amount)}</span>`}</div>`).join("");
+    $("[data-prev]").innerHTML = lines.map(l => `<div class="row"><div class="grow"><b>${esc(l.title)}</b><span class="tiny">${l.type === "income" ? "دخل · " : l.type === "loan" ? "سلف · " : ""}${l.type === "loan" ? "" : esc(l.category)}${l.wallet ? " · " + esc(wName(l.wallet)) : ""}${l.date !== today() ? " · امبارح" : ""}</span></div>${l.err ? `<span class="val bad">${esc(l.err)}</span>` : `<span class="val ${l.type === "income" ? "pos" : ""}">${money(l.amount)}</span>`}</div>`).join("");
     $("[data-save]").textContent = ok.length > 1 ? `سجّل ${ok.length} بنود` : "سجّل"; };
   const save = () => {
     if (A.mode === "amt") { const amount = toNum(norm($("[data-in=amt]").value)); if (!(amount > 0)) { $("[data-in=amt]").focus(); return toast("اكتب المبلغ"); }
@@ -168,6 +193,7 @@ function bindAdd(box, after){
     const ids = add(ok); $("[data-in=msg]").value = ""; preview();
     toast(`اتسجّل ${ok.length} بند` + (lines.length > ok.length ? ` · ${lines.length - ok.length} اتساب` : ""), () => undo(ids)); after && after(); };
   box.querySelectorAll("[data-t]").forEach(b => b.onclick = () => setMode(b.dataset.t));
+  $("[data-wp]").onclick = e => { const b = e.target.closest("[data-w]"); if (!b) return; store.set("h-wallet", b.dataset.w); drawW(); $("[data-in=amt]").focus(); };
   $("[data-cats]").onclick = e => { const b = e.target.closest("[data-c]"); if (!b) return; A.cat = b.dataset.c; if (A.type === "expense") store.set("h-cat", A.cat); drawCats(); $("[data-in=amt]").focus(); };
   $("[data-in=msg]").oninput = preview; $("[data-save]").onclick = save;
   [$("[data-in=amt]"), $("[data-in=ttl]")].forEach(i => i.onkeydown = e => { if (e.key === "Enter") save(); });
@@ -177,7 +203,8 @@ function bindAdd(box, after){
 }
 function add(list){ const now = new Date().toISOString();
   // من غير انتظار السيرفر: بيتحفظ فورًا ويتزامن لوحده لو مفيش نت
-  return list.map(l => { const ref = doc(col()); setDoc(ref, { amount: r2(l.amount), title: l.title, category: l.category, type: l.type || "expense", date: l.date, month: monthOf(l.date), note: l.note || "", createdAt: now })
+  return list.map(l => { const ref = doc(col()), extra = {}; ["to", "person", "dir"].forEach(k => l[k] != null && (extra[k] = l[k]));
+    setDoc(ref, { amount: r2(l.amount), title: l.title, category: l.category, type: l.type || "expense", wallet: l.wallet || defWallet(), date: l.date, month: monthOf(l.date), note: l.note || "", createdAt: now, ...extra })
     .catch(e => { console.error(e); toast("ما اتحفظش — حاول تاني"); }); return ref.id; }); }
 function undo(ids){ ids.forEach(id => deleteDoc(doc(col(), id)).catch(() => {})); toast("اتلغى"); }
 function budgetWarn(type, cat, amount){ if (type !== "expense") return; const m = monthOf(today()), ex = inMonth(expenses(), m);
@@ -191,9 +218,17 @@ function homeData(box){
   const m = monthOf(today()), ex = inMonth(expenses(), m);
   box.innerHTML = `<div class="stats"><div class="stat"><span class="tiny">النهارده</span><b>${money(sum(ex.filter(i => i.date === today())))}</b></div>
      <div class="stat"><span class="tiny">${esc(monthName(m))}</span><b>${money(sum(ex))}</b></div></div>
+   ${quickRepeat()}
    <section class="card"><div class="row-h"><b>آخر حاجات</b><button class="link" data-more>لوحة التحكم ←</button></div>${rows(S.items.slice(0, 10), true) || `<p class="empty">ابدأ سجّل من فوق 👆</p>`}</section>`;
   box.querySelector("[data-more]").onclick = () => go("summary"); bindRows(box);
+  box.querySelectorAll("[data-rep]").forEach(b => b.onclick = () => { const r = JSON.parse(b.dataset.rep); const ids = add([{ ...r, date: today() }]);
+    toast(`اتسجّل «${r.title}» ${money(r.amount)}`, () => undo(ids)); budgetWarn("expense", r.category, r.amount); });
 }
+/* الحاجات اللي بتتكرر: نفس الاسم والمبلغ ٢+ مرات في آخر ٦٠ يوم ← زرار بضغطة */
+function quickRepeat(){ const since = addDays(today(), -60), cnt = {};
+  expenses().filter(i => i.date >= since).forEach(i => { const k = i.title + "|" + i.amount; (cnt[k] = cnt[k] || { n: 0, i }).n++; });
+  const top = Object.values(cnt).filter(x => x.n >= 2).sort((a, b) => b.n - a.n).slice(0, 6);
+  return top.length ? `<section class="card rep"><b class="tiny">بضغطة واحدة</b><div class="chips">${top.map(({ i }) => `<button class="chip" data-rep="${esc(JSON.stringify({ title: i.title, amount: i.amount, category: i.category, wallet: i.wallet || "cash" }))}">${esc(i.title)} · ${money(i.amount)}</button>`).join("")}</div></section>` : ""; }
 /* ================= لوحة التحكم ================= */
 // ألوان الفئات: ثابتة لكل فئة حسب ترتيبها (مش حسب الترتيب في الرسم) — متختبرة لعمى الألوان
 const PAL_L = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#6250d6"], PAL_D = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#0ca30c","#9085e9"];
@@ -307,7 +342,9 @@ function summary(box){
     const x = Math.min(innerWidth - tip.offsetWidth - 8, Math.max(8, e.clientX - tip.offsetWidth / 2)); tip.style.left = x + "px"; tip.style.top = Math.max(8, e.clientY - tip.offsetHeight - 14) + "px"; };
   document.addEventListener("pointermove", show); document.addEventListener("pointerdown", show); document.addEventListener("scroll", () => tip.hidden = true, true); }
 const groupSum = (list, key) => { const o = {}; list.forEach(i => { const k = key(i); o[k] = (o[k] || 0) + (+i.amount || 0); }); return Object.entries(o).sort((a, b) => b[1] - a[1]); };
-function rows(list, withDate){ return list.map(i => `<button class="row item" data-edit="${esc(i.id)}"><div class="grow"><b>${esc(i.title)}</b><span class="tiny">${esc(i.category)}${withDate ? " · " + esc(dayName(i.date)) : ""}${i.note ? " · " + esc(i.note) : ""}${i.createdAt ? ` · <span class="added">اتضاف ${esc(addedAt(i))}</span>` : ""}</span></div><span class="val ${i.type === "income" ? "pos" : ""}">${i.type === "income" ? "+" : ""}${money(i.amount)}</span></button>`).join(""); }
+const sign = i => i.type === "income" || (i.type === "loan" && LOAN_SIGN[i.dir] > 0) ? "pos" : "";
+const rowTitle = i => i.type === "transfer" ? `تحويل: ${wName(i.wallet)} ← ${wName(i.to)}` : i.title;
+function rows(list, withDate){ const multi = wallets().length > 1; return list.map(i => `<button class="row item" data-edit="${esc(i.id)}"><div class="grow"><b>${esc(rowTitle(i))}</b><span class="tiny">${i.type === "transfer" ? "تحويل" : esc(i.category)}${multi && i.type !== "transfer" ? " · " + esc(wName(i.wallet)) : ""}${withDate ? " · " + esc(dayName(i.date)) : ""}${i.note ? " · " + esc(i.note) : ""}${i.createdAt ? ` · <span class="added">اتضاف ${esc(addedAt(i))}</span>` : ""}</span></div><span class="val ${sign(i)}">${sign(i) ? "+" : ""}${money(i.amount)}</span></button>`).join(""); }
 function bindRows(box){ box.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editItem(b.dataset.edit)); }
 
 /* ================= كشف الحساب ================= */
@@ -315,9 +352,9 @@ const PRESETS = [["this","الشهر ده"],["last","الشهر اللي فات"
 function presetRange(p){ const m = monthOf(today()); return p === "this" ? [m + "-01", today()] : p === "last" ? [shiftMonth(m, -1) + "-01", shiftMonth(m, -1) + "-" + lastDay(shiftMonth(m, -1))]
   : p === "3m" ? [shiftMonth(m, -2) + "-01", today()] : p === "year" ? [today().slice(0, 4) + "-01-01", today()] : ["2000-01-01", "2100-12-31"]; }
 function filtered(){ const f = S.st, q = norm(f.q);
-  return S.items.filter(i => i.date >= f.from && i.date <= f.to && (!f.cat || i.category === f.cat) && (!f.type || (i.type || "expense") === f.type) && (!q || norm(i.title + " " + (i.note || "") + " " + i.category).includes(q))); }
+  return S.items.filter(i => i.date >= f.from && i.date <= f.to && (!f.cat || i.category === f.cat) && (!f.type || (i.type || "expense") === f.type) && (!f.wallet || (i.wallet || "cash") === f.wallet || i.to === f.wallet) && (!q || norm(i.title + " " + (i.note || "") + " " + i.category).includes(q))); }
 function statement(box){
-  const f = S.st, list = filtered(), ex = list.filter(i => i.type !== "income"), inc = list.filter(i => i.type === "income");
+  const f = S.st, list = filtered(), ex = list.filter(i => !i.type || i.type === "expense"), inc = list.filter(i => i.type === "income");
   const allCats = [...new Set([...cats(), ...INCOME_CATS, ...S.items.map(i => i.category)])];
   const active = PRESETS.find(([k]) => { const [a, b] = presetRange(k); return a === f.from && b === f.to; })?.[0];
   let body = "";
@@ -328,13 +365,14 @@ function statement(box){
     body = ms.map(m => { const e = sum(ex.filter(i => i.month === m)), n = sum(inc.filter(i => i.month === m));
       return `<details class="grp"><summary><span class="grow"><b>${esc(monthName(m))}</b><span class="tiny">${n ? `دخل ${money(n)} · صافي ${money(n - e)}` : `${list.filter(i => i.month === m).length} بند`}</span></span><span class="val neg">${money(e)}</span></summary>${rows(list.filter(i => i.month === m), true)}</details>`; }).join("");
   } else { const days = [...new Set(list.map(i => i.date))].sort().reverse();
-    body = days.map(d => { const di = list.filter(i => i.date === d); return `<div class="day"><span>${esc(dayName(d))}</span><span>${money(sum(di.filter(i => i.type !== "income")))}</span></div>${rows(di)}`; }).join(""); }
+    body = days.map(d => { const di = list.filter(i => i.date === d); return `<div class="day"><span>${esc(dayName(d))}</span><span>${money(sum(di.filter(i => !i.type || i.type === "expense")))}</span></div>${rows(di)}`; }).join(""); }
   box.innerHTML = `
    <section class="card filters no-print" data-keep>
      <div class="chips tight">${PRESETS.map(([k, l]) => `<button class="chip" data-p="${k}" aria-pressed="${active === k}">${l}</button>`).join("")}</div>
      <div class="grid2"><label>من<input type="date" data-f="from" value="${esc(f.from)}"></label><label>إلى<input type="date" data-f="to" value="${esc(f.to)}"></label></div>
      <div class="grid2"><select data-f="cat"><option value="">كل الفئات</option>${allCats.map(c => `<option ${c === f.cat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
-       <select data-f="type"><option value="">مصروف ودخل</option><option value="expense" ${f.type === "expense" ? "selected" : ""}>مصروف بس</option><option value="income" ${f.type === "income" ? "selected" : ""}>دخل بس</option></select></div>
+       <select data-f="type"><option value="">الكل</option><option value="expense" ${f.type === "expense" ? "selected" : ""}>مصروف بس</option><option value="income" ${f.type === "income" ? "selected" : ""}>دخل بس</option><option value="loan" ${f.type === "loan" ? "selected" : ""}>سلف</option><option value="transfer" ${f.type === "transfer" ? "selected" : ""}>تحويلات</option></select></div>
+     ${wallets().length > 1 ? `<select data-f="wallet" style="margin-top:8px"><option value="">كل الحسابات</option>${wallets().map(w => `<option value="${esc(w.id)}" ${w.id === f.wallet ? "selected" : ""}>${esc(w.name)}</option>`).join("")}</select>` : ""}
      <input type="search" data-f="q" placeholder="دوّر في البنود…" value="${esc(f.q)}">
    </section>
    <div class="print-head"><b>كشف حساب — ${esc(S.user.displayName || "")}</b><span>${esc(fmtDate(f.from < "2001" ? (S.items.at(-1)?.date || today()) : f.from))} ← ${esc(fmtDate(f.to > "2099" ? today() : f.to))}</span></div>
@@ -350,7 +388,7 @@ function statement(box){
 }
 function exportCsv(list){
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const out = [["التاريخ", "النوع", "البند", "الفئة", "المبلغ", "ملاحظة", "وقت الإضافة"], ...list.slice().reverse().map(i => [i.date, i.type === "income" ? "دخل" : "مصروف", i.title, i.category, i.type === "income" ? i.amount : -i.amount, i.note || "", i.createdAt ? addedAt(i) : ""])];
+  const out = [["التاريخ", "النوع", "البند", "الفئة", "الحساب", "المبلغ", "ملاحظة", "وقت الإضافة"], ...list.slice().reverse().map(i => [i.date, ({ income: "دخل", loan: "سلف", transfer: "تحويل" })[i.type] || "مصروف", rowTitle(i), i.category, i.type === "transfer" ? `${wName(i.wallet)} ← ${wName(i.to)}` : wName(i.wallet), i.type === "income" || sign(i) ? i.amount : -i.amount, i.note || "", i.createdAt ? addedAt(i) : ""])];
   const blob = new Blob(["﻿" + out.map(r => r.map(q).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `كشف-حساب-${S.st.from}-${S.st.to}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
@@ -413,11 +451,13 @@ function settings(box){
 /* ================= تعديل بند ================= */
 function editItem(id){
   const i = S.items.find(x => x.id === id); if (!i) return; const t = i.type || "expense";
+  if (t === "transfer" || t === "loan") return editSimple(i);
   const ov = modal(`<h3>تعديل</h3>
     <div class="seg"><button data-et="expense" aria-pressed="${t === "expense"}">مصروف</button><button data-et="income" aria-pressed="${t === "income"}">دخل</button></div>
     <input class="amt-in" id="eA" inputmode="decimal" value="${i.amount}">
     <label class="lbl">البند<input id="eT" value="${esc(i.title)}" maxlength="80"></label>
     <div class="grid2"><label class="lbl">الفئة<select id="eC"></select></label><label class="lbl">التاريخ<input id="eD" type="date" value="${esc(i.date)}"></label></div>
+    ${wallets().length > 1 ? `<label class="lbl">الحساب<select id="eW">${wallets().map(w => `<option value="${esc(w.id)}" ${w.id === (i.wallet || "cash") ? "selected" : ""}>${esc(w.name)}</option>`).join("")}</select></label>` : ""}
     <label class="lbl">ملاحظة<input id="eN" value="${esc(i.note || "")}" maxlength="140"></label>
     <p class="tiny">${i.createdAt ? "اتضاف " + esc(addedAt(i)) : ""}${i.updatedAt ? " · آخر تعديل " + esc(addedAt({ createdAt: i.updatedAt })) : ""}</p>
     <div class="mfoot"><button class="btn primary" id="eS">احفظ</button><button class="btn danger" id="eX">امسح</button></div>`);
@@ -425,11 +465,97 @@ function editItem(id){
   const fill = () => { const list = [...new Set([...catsFor(type), i.category])]; $("#eC").innerHTML = list.map(c => `<option ${c === i.category ? "selected" : ""}>${esc(c)}</option>`).join(""); };
   ov.querySelectorAll("[data-et]").forEach(b => b.onclick = () => { type = b.dataset.et; ov.querySelectorAll("[data-et]").forEach(x => x.setAttribute("aria-pressed", x === b)); fill(); }); fill();
   $("#eS").onclick = () => { const amount = toNum(norm($("#eA").value)), date = $("#eD").value; if (!(amount > 0)) return toast("المبلغ لازم يكون أكبر من صفر"); if (!date) return toast("اختار التاريخ");
-    setDoc(doc(col(), id), { ...stripId(i), amount, title: $("#eT").value.trim() || $("#eC").value, category: $("#eC").value, type, date, month: monthOf(date), note: $("#eN").value.trim(), updatedAt: new Date().toISOString() }).catch(() => toast("ما اتحفظش"));
+    setDoc(doc(col(), id), { ...stripId(i), amount, title: $("#eT").value.trim() || $("#eC").value, category: $("#eC").value, type, date, month: monthOf(date), note: $("#eN").value.trim(), wallet: $("#eW")?.value || i.wallet || "cash", updatedAt: new Date().toISOString() }).catch(() => toast("ما اتحفظش"));
     closeModal(); toast("اتحفظ"); };
   $("#eX").onclick = () => { deleteDoc(doc(col(), id)).catch(() => toast("ما اتمسحش")); closeModal(); toast(`اتمسح «${i.title}»`, () => { setDoc(doc(col(), id), stripId(i)); toast("رجع"); }); };
 }
 const stripId = ({ id, ...d }) => d;
+function editSimple(i){
+  const ov = modal(`<h3>${esc(rowTitle(i))}</h3><input class="amt-in" id="eA" inputmode="decimal" value="${i.amount}">
+    <div class="grid2"><label class="lbl">التاريخ<input id="eD" type="date" value="${esc(i.date)}"></label><label class="lbl">ملاحظة<input id="eN" value="${esc(i.note || "")}" maxlength="140"></label></div>
+    <p class="tiny">${i.createdAt ? "اتضاف " + esc(addedAt(i)) : ""}</p>
+    <div class="mfoot"><button class="btn primary" id="eS">احفظ</button><button class="btn danger" id="eX">امسح</button></div>`);
+  const $ = q => ov.querySelector(q);
+  $("#eS").onclick = () => { const amount = toNum(norm($("#eA").value)), date = $("#eD").value; if (!(amount > 0) || !date) return toast("اكتب المبلغ والتاريخ");
+    setDoc(doc(col(), i.id), { ...stripId(i), amount, date, month: monthOf(date), note: $("#eN").value.trim(), updatedAt: new Date().toISOString() }).catch(() => toast("ما اتحفظش")); closeModal(); toast("اتحفظ"); };
+  $("#eX").onclick = () => { deleteDoc(doc(col(), i.id)).catch(() => toast("ما اتمسحش")); closeModal(); toast("اتمسح", () => { setDoc(doc(col(), i.id), stripId(i)); toast("رجع"); }); };
+}
+
+/* ================= الفلوس: الحسابات والسلف ================= */
+function money_(box){
+  const ws = wallets(), total = r2(ws.reduce((t, w) => t + balance(w.id), 0)), m = monthOf(today());
+  const D = debts(), people = Object.entries(D).filter(([, d]) => Math.abs(d.net) > .009).sort((a, b) => Math.abs(b[1].net) - Math.abs(a[1].net));
+  const forMe = r2(people.filter(([, d]) => d.net > 0).reduce((t, [, d]) => t + d.net, 0)), onMe = r2(people.filter(([, d]) => d.net < 0).reduce((t, [, d]) => t - d.net, 0));
+  const settled = Object.entries(D).filter(([, d]) => Math.abs(d.net) <= .009);
+  box.innerHTML = `
+   <section class="card hero"><span class="tiny">معاك في كل الحسابات</span><b class="${total < 0 ? "neg" : ""}">${money(total)}</b>
+     ${forMe || onMe ? `<span class="tiny">${forMe ? `ليك عند الناس <b class="pos">${money(forMe)}</b>` : ""}${forMe && onMe ? " · " : ""}${onMe ? `عليك <b class="neg">${money(onMe)}</b>` : ""}</span>` : ""}</section>
+   <section class="card"><div class="row-h"><h3>الحسابات</h3><span>${ws.length > 1 ? `<button class="link" id="tr">⇄ تحويل</button> · ` : ""}<button class="link" id="nw">+ حساب</button></span></div>
+     ${ws.map(w => { const mi = S.items.filter(i => i.month === m); const inn = mi.reduce((t, i) => t + Math.max(0, walletDelta(i, w.id)), 0), out = mi.reduce((t, i) => t + Math.max(0, -walletDelta(i, w.id)), 0);
+       return `<button class="row item" data-wal="${esc(w.id)}"><div class="grow"><b>${esc(w.name)}</b><span class="tiny">الشهر ده: داخل ${money(inn)} · خارج ${money(out)}</span></div><span class="val ${balance(w.id) < 0 ? "neg" : ""}">${money(balance(w.id))}</span></button>`; }).join("")}
+     <p class="tiny">دوس على أي حساب تعدّل اسمه أو رصيده، أو تشوف كشفه.</p></section>
+   <section class="card"><div class="row-h"><h3>السلف</h3><button class="link" id="nl">+ سلفة</button></div>
+     ${people.length ? people.map(([p, d]) => `<button class="row item" data-person="${esc(p)}"><div class="grow"><b>${esc(p)}</b><span class="tiny">${d.net > 0 ? "ليك عنده" : "عليك ليه"} · آخر حركة ${esc(dayName(d.items[0].date))}</span></div><span class="val ${d.net > 0 ? "pos" : "neg"}">${money(Math.abs(d.net))}</span></button>`).join("")
+       : `<p class="empty">مفيش سلف مفتوحة 👌</p>`}
+     ${settled.length ? `<details><summary class="tiny">اتقفلت (${settled.length})</summary>${settled.map(([p]) => `<button class="row item" data-person="${esc(p)}"><div class="grow"><b>${esc(p)}</b><span class="tiny">خالصين</span></div><span class="val">✓</span></button>`).join("")}</details>` : ""}
+     <p class="tiny">أو اكتب في «برسالة»: «سلفت أحمد 500» · «استلفت من محمد 200» · «أحمد رجعلي 200» · «رجعت لمحمد 200»</p></section>`;
+  const $ = q => box.querySelector(q);
+  $("#nw").onclick = () => walletModal(); $("#nl").onclick = () => loanModal(); const tr = $("#tr"); tr && (tr.onclick = () => transferModal());
+  box.querySelectorAll("[data-wal]").forEach(b => b.onclick = () => walletModal(b.dataset.wal));
+  box.querySelectorAll("[data-person]").forEach(b => b.onclick = () => personModal(b.dataset.person));
+}
+const wSelect = (id, sel) => `<select id="${id}">${wallets().map(w => `<option value="${esc(w.id)}" ${w.id === sel ? "selected" : ""}>${esc(w.name)}</option>`).join("")}</select>`;
+function walletModal(id){
+  const w = wallets().find(x => x.id === id), isNew = !w;
+  const ov = modal(`<h3>${isNew ? "حساب جديد" : esc(w.name)}</h3>
+    ${!isNew ? `<div class="hero-s"><span class="tiny">الرصيد دلوقتي</span><b>${money(balance(w.id))}</b></div>` : ""}
+    <label class="lbl">الاسم<input id="wn" value="${esc(w?.name || "")}" placeholder="كاش، فيزا، إنستاباي، محفظة…" maxlength="24"></label>
+    <label class="lbl">${isNew ? "معاك فيه كام دلوقتي؟" : "رصيد البداية"}<input id="wo" inputmode="decimal" value="${isNew ? "" : (w.opening || 0)}" placeholder="0"></label>
+    ${!isNew ? `<p class="tiny">رصيد البداية هو اللي كان معاك قبل أول حاجة سجّلتها. لو الرصيد مش مظبوط، ظبّط هنا.</p>` : ""}
+    <div class="mfoot"><button class="btn primary" id="ws">احفظ</button>${!isNew ? `<button class="btn" id="wk">كشفه</button>${wallets().length > 1 ? `<button class="btn danger" id="wd">امسح</button>` : ""}` : ""}</div>`);
+  const $ = q => ov.querySelector(q);
+  $("#ws").onclick = () => { const name = $("#wn").value.trim(), opening = toNum(norm($("#wo").value)) || 0; if (!name) return toast("اكتب اسم الحساب");
+    if (wallets().some(x => x.id !== id && norm(x.name) === norm(name))) return toast("فيه حساب بالاسم ده");
+    const list = isNew ? [...wallets(), { id: uid(), name, opening }] : wallets().map(x => x.id === id ? { ...x, name, opening } : x);
+    saveCfg({ wallets: list }); closeModal(); render(); toast(isNew ? "اتضاف الحساب" : "اتحفظ"); };
+  const k = $("#wk"); k && (k.onclick = () => { closeModal(); go("statement", { from: "2000-01-01", to: "2100-12-31", cat: "", type: "", q: "", group: "day", wallet: id }); });
+  const d = $("#wd"); d && (d.onclick = () => { if (S.items.some(i => (i.wallet || "cash") === id || i.to === id)) return toast("عليه حركات — انقلها أو امسحها الأول");
+    if (!d.dataset.sure) { d.dataset.sure = 1; d.textContent = "متأكد؟"; return; } saveCfg({ wallets: wallets().filter(x => x.id !== id) }); closeModal(); render(); });
+}
+function transferModal(){
+  const ws = wallets(); const ov = modal(`<h3>تحويل بين حساباتك</h3><input class="amt-in" id="ta" inputmode="decimal" placeholder="0">
+    <div class="grid2"><label class="lbl">من${wSelect("tf", ws[0].id)}</label><label class="lbl">إلى${wSelect("tt", ws[1].id)}</label></div>
+    <label class="lbl">ملاحظة<input id="tn" maxlength="80" placeholder="مثلًا: سحبت من الـATM"></label>
+    <div class="mfoot"><button class="btn primary" id="ts">حوّل</button></div><p class="tiny">التحويل مش بيتحسب مصروف ولا دخل.</p>`);
+  const $ = q => ov.querySelector(q);
+  $("#ts").onclick = () => { const amount = toNum(norm($("#ta").value)), from = $("#tf").value, to = $("#tt").value; if (!(amount > 0)) return toast("اكتب المبلغ"); if (from === to) return toast("اختار حسابين مختلفين");
+    const ids = add([{ amount, type: "transfer", wallet: from, to, title: `تحويل ${wName(from)} ← ${wName(to)}`, category: "تحويل", date: today(), note: $("#tn").value.trim() }]);
+    closeModal(); toast(`اتحوّل ${money(amount)}`, () => undo(ids)); };
+}
+function loanModal(person, dir){
+  const ppl = Object.keys(debts());
+  const ov = modal(`<h3>سلفة</h3><div class="seg">${Object.entries(LOAN_LBL).map(([k, l]) => `<button data-ld="${k}" aria-pressed="${k === (dir || "lent")}">${l.replace(" لـ", "").replace(" من", "")}</button>`).join("")}</div>
+    <input class="amt-in" id="la" inputmode="decimal" placeholder="0">
+    <label class="lbl">مين؟<input id="lp" list="ppl" value="${esc(person || "")}" maxlength="40" placeholder="الاسم"></label><datalist id="ppl">${ppl.map(p => `<option value="${esc(p)}">`).join("")}</datalist>
+    <div class="grid2">${wallets().length > 1 ? `<label class="lbl">الحساب${wSelect("lw", defWallet())}</label>` : ""}<label class="lbl">ملاحظة<input id="ln" maxlength="80"></label></div>
+    <div class="mfoot"><button class="btn primary" id="ls">سجّل</button></div>`);
+  const $ = q => ov.querySelector(q); let d = dir || "lent";
+  ov.querySelectorAll("[data-ld]").forEach(b => b.onclick = () => { d = b.dataset.ld; ov.querySelectorAll("[data-ld]").forEach(x => x.setAttribute("aria-pressed", x === b)); });
+  if (person) $("#la").focus();
+  $("#ls").onclick = () => { const amount = toNum(norm($("#la").value)), p = $("#lp").value.trim(); if (!(amount > 0)) return toast("اكتب المبلغ"); if (!p) return toast("اكتب الاسم");
+    const ids = add([{ amount, type: "loan", dir: d, person: p, title: loanTitle(d, p), category: "سلف", wallet: $("#lw")?.value || defWallet(), date: today(), note: $("#ln").value.trim() }]);
+    closeModal(); toast(`اتسجّل: ${loanTitle(d, p)} ${money(amount)}`, () => undo(ids)); };
+}
+function personModal(p){
+  const d = debts()[p]; if (!d) return; const owes = d.net > 0;
+  const ov = modal(`<h3>${esc(p)}</h3><div class="hero-s"><span class="tiny">${Math.abs(d.net) < .01 ? "خالصين" : owes ? "ليك عنده" : "عليك ليه"}</span><b class="${owes ? "pos" : d.net < 0 ? "neg" : ""}">${money(Math.abs(d.net))}</b></div>
+    ${Math.abs(d.net) > .009 ? `<div class="mfoot"><button class="btn primary" id="pa">${owes ? "رجّعلي الكل" : "رجّعت له الكل"}</button><button class="btn" id="pp">جزء / سلفة تانية</button></div>` : `<div class="mfoot"><button class="btn" id="pp">سلفة جديدة</button></div>`}
+    <h3 style="margin-top:14px">الحركات</h3>${rows(d.items, true)}`);
+  const $ = q => ov.querySelector(q); bindRows(ov);
+  const a = $("#pa"); a && (a.onclick = () => { const ids = add([{ amount: Math.abs(d.net), type: "loan", dir: owes ? "got_back" : "paid_back", person: p, title: loanTitle(owes ? "got_back" : "paid_back", p), category: "سلف", date: today() }]);
+    closeModal(); toast(`اتقفلت سلفة ${p} ✓`, () => undo(ids)); });
+  $("#pp").onclick = () => { closeModal(); loanModal(p, Math.abs(d.net) > .009 ? (owes ? "got_back" : "paid_back") : "lent"); };
+}
 
 /* ================= نافذة + تنبيه ================= */
 function modal(html){ closeModal(); const ov = document.createElement("div"); ov.className = "overlay"; ov.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><button class="icon-btn close" data-close aria-label="إغلاق">✕</button>${html}</div>`;

@@ -148,3 +148,14 @@ details summary{cursor:pointer;list-style:none} details summary::-webkit-details
 .crow small{color:var(--muted)} .crow .val{min-width:84px;text-align:left}
 .viz-tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--bg);font-size:.78rem;padding:6px 10px;border-radius:10px;box-shadow:var(--shadow);max-width:260px}
 @media (min-width:720px){.kpis{grid-template-columns:repeat(4,1fr)} .wrap{max-width:760px}}
+
+/* ===== الفلوس والسلف ===== */
+.wpick{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.chip.sm{padding:3px 10px;font-size:.8rem}
+.card.hero{text-align:center;padding:20px 16px}
+.card.hero > b{font-family:var(--f-display);font-size:2rem;display:block;margin:2px 0 4px}
+.card.hero b b,.card.hero .tiny b{font-size:inherit;display:inline;font-family:inherit}
+.hero-s{background:var(--surface2);border-radius:16px;padding:12px;text-align:center;margin-bottom:8px}
+.hero-s b{font-family:var(--f-display);font-size:1.6rem;display:block}
+.rep .chips{margin-top:6px}
+.tabbar button{max-width:96px;font-size:.68rem}
