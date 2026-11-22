@@ -1,0 +1,19 @@
+{
+  "name": "حسابات — سجّل مصاريفك بسرعة",
+  "short_name": "حسابات",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#0c0d17",
+  "theme_color": "#4f46e5",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [{ "name": "سجّل مصروف", "short_name": "مصروف", "url": "./?quick=1", "icons": [{ "src": "icon-192.png", "sizes": "192x192", "type": "image/png" }] }],
+  "share_target": { "action": "./", "method": "GET", "params": { "title": "title", "text": "text", "url": "url" } }
+}
