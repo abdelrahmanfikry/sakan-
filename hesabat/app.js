@@ -220,7 +220,7 @@ function barsSvg(data, o = {}){
   const step = Math.ceil(n / 8);
   const bars = data.map((d, i) => { const h = Math.max(0, (H - T - B) - (y(d.v) - T)), x = xr(i), r = Math.min(4, bw / 2, h);
     const path = h ? `M${x},${H - B} V${H - B - h + r} Q${x},${H - B - h} ${x + r},${H - B - h} H${x + bw - r} Q${x + bw},${H - B - h} ${x + bw},${H - B - h + r} V${H - B} Z` : "";
-    return `<g class="hit" data-tip="${esc(d.tip)}"><rect x="${W - R - (i + 1) * cw}" y="${T}" width="${cw}" height="${H - T - B}" fill="transparent"/>${path ? `<path d="${path}" class="${d.hi ? "b hi" : "b"}"/>` : ""}</g>${i % step === 0 || i === n - 1 ? `<text x="${x + bw / 2}" y="${H - 6}" class="ax mid">${esc(d.label)}</text>` : ""}`; }).join("");
+    return `<g class="hit" data-tip="${esc(d.tip)}"><rect x="${W - R - (i + 1) * cw}" y="${T}" width="${cw}" height="${H - T - B}" fill="transparent"/>${path ? `<path d="${path}" class="${d.hi ? "b hi" : "b"}"/>` : ""}</g>${i % step === 0 || (i === n - 1 && (n - 1) % step >= step / 2) ? `<text x="${x + bw / 2}" y="${H - 6}" class="ax mid">${esc(d.label)}</text>` : ""}`; }).join("");
   const ref = o.ref ? `<line x1="${L}" x2="${W - R}" y1="${y(o.ref)}" y2="${y(o.ref)}" class="ref"/><text x="${L}" y="${y(o.ref) - 4}" class="ax ref-t">${esc(o.refLabel || "")}</text>` : "";
   return `<svg viewBox="0 0 ${W} ${H}" class="viz" role="img" aria-label="${esc(o.aria || "")}">${grid}${bars}${ref}</svg>`; }
 /* خطوط تراكمي: نفس المحور لكل الخطوط (فلوس) */
