@@ -31,6 +31,20 @@ service cloud.firestore {
       allow read, write: if authed() && uid == request.auth.uid;
     }
 
+    // تطبيق «حسابات»: مصاريف شخصية — كل واحد يشوف ويعدّل بتاعه بس
+    match /ledgers/{uid} {
+      allow read, write: if authed() && uid == request.auth.uid;
+      match /items/{id} {
+        allow read, delete: if authed() && uid == request.auth.uid;
+        allow create, update: if authed() && uid == request.auth.uid
+          && request.resource.data.amount is number && request.resource.data.amount > 0 && request.resource.data.amount < 100000000
+          && request.resource.data.title is string && request.resource.data.title.size() <= 200
+          && request.resource.data.category is string && request.resource.data.month is string
+          && request.resource.data.date.matches(request.resource.data.month + '-[0-9]{2}')
+          && request.resource.data.month.matches('[0-9]{4}-[0-9]{2}');
+      }
+    }
+
     // أكواد الدعوة
     match /codes/{code} {
       // get بس (لازم تعرف الكود) — ممنوع list علشان محدش يسحب كل الأكواد
