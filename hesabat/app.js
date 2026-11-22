@@ -108,7 +108,7 @@ function renderLogin(){
 }
 
 /* ================= الهيكل ================= */
-const NAV = [["home","سجّل","＋"],["summary","الملخص","◔"],["statement","كشف حساب","☰"],["months","الشهور","▥"],["settings","الإعدادات","⚙"]];
+const NAV = [["home","سجّل","＋"],["summary","اللوحة","◔"],["statement","كشف حساب","☰"],["months","الشهور","▥"],["settings","الإعدادات","⚙"]];
 function render(){
   if (!S.user) return;
   const ae = document.activeElement;
@@ -191,33 +191,121 @@ function homeData(box){
   const m = monthOf(today()), ex = inMonth(expenses(), m);
   box.innerHTML = `<div class="stats"><div class="stat"><span class="tiny">النهارده</span><b>${money(sum(ex.filter(i => i.date === today())))}</b></div>
      <div class="stat"><span class="tiny">${esc(monthName(m))}</span><b>${money(sum(ex))}</b></div></div>
-   <section class="card"><div class="row-h"><b>آخر حاجات</b><button class="link" data-more>الملخص ←</button></div>${rows(S.items.slice(0, 10), true) || `<p class="empty">ابدأ سجّل من فوق 👆</p>`}</section>`;
+   <section class="card"><div class="row-h"><b>آخر حاجات</b><button class="link" data-more>لوحة التحكم ←</button></div>${rows(S.items.slice(0, 10), true) || `<p class="empty">ابدأ سجّل من فوق 👆</p>`}</section>`;
   box.querySelector("[data-more]").onclick = () => go("summary"); bindRows(box);
 }
+/* ================= لوحة التحكم ================= */
+// ألوان الفئات: ثابتة لكل فئة حسب ترتيبها (مش حسب الترتيب في الرسم) — متختبرة لعمى الألوان
+const PAL_L = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#6250d6"], PAL_D = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#0ca30c","#9085e9"];
+const catColor = c => { const i = cats().filter(x => x !== "أخرى").indexOf(c); return i >= 0 && i < 7 ? (isDark() ? PAL_D : PAL_L)[i] : (isDark() ? "#6f7287" : "#a3a6b8"); };
+const WD = ["السبت","الحد","الاتنين","التلات","الأربع","الخميس","الجمعة"]; // أسبوع مصر بيبدأ السبت
+const wdOf = d => (new Date(d + "T00:00:00").getDay() + 1) % 7;
+const daysBetween = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 864e5) + 1;
+const addDays = (d, k) => ymd(new Date(d + "T12:00:00").getTime() + k * 864e5);
+const DASH = [["this","الشهر ده"],["last","الشهر اللي فات"],["3m","آخر ٣ شهور"],["year","السنة دي"]];
+function dashRange(p){ const m = monthOf(today()), d = +today().slice(8);
+  if (p === "last") { const l = shiftMonth(m, -1), l2 = shiftMonth(m, -2); return { from: l + "-01", to: `${l}-${lastDay(l)}`, pf: l2 + "-01", pt: `${l2}-${lastDay(l2)}`, full: `${l}-${lastDay(l)}`, month: l }; }
+  if (p === "3m") { const f = shiftMonth(m, -2) + "-01", pf = shiftMonth(m, -5) + "-01"; return { from: f, to: today(), pf, pt: addDays(f, -1), full: today() }; }
+  if (p === "year") { const y = +today().slice(0, 4); return { from: `${y}-01-01`, to: today(), pf: `${y - 1}-01-01`, pt: `${y - 1}${today().slice(4)}`, full: today() }; }
+  const pm = shiftMonth(m, -1); return { from: m + "-01", to: today(), pf: pm + "-01", pt: `${pm}-${String(Math.min(d, lastDay(pm))).padStart(2, "0")}`, full: `${m}-${lastDay(m)}`, month: m, live: true }; }
+const between = (list, a, b) => list.filter(i => i.date >= a && i.date <= b);
+const kfmt = n => { n = +n || 0; return n >= 1e6 ? r2(n / 1e6).toLocaleString("ar-EG") + "م" : n >= 1e3 ? r2(n / 1e3).toLocaleString("ar-EG", { maximumFractionDigits: 1 }) + "ك" : Math.round(n).toLocaleString("ar-EG"); };
+const niceMax = v => { if (v <= 0) return 1; const p = 10 ** Math.floor(Math.log10(v)), f = v / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p; };
+
+/* رسم أعمدة: أقدم حاجة يمين (عربي) — كل عمود عليه تلميح لما تقف عليه */
+function barsSvg(data, o = {}){
+  const W = 560, H = o.h || 170, L = 8, R = 40, T = 10, B = 22, n = data.length, mx = niceMax(Math.max(...data.map(d => d.v), o.ref || 0));
+  const cw = (W - L - R) / n, bw = Math.max(2, Math.min(28, cw - 2)), y = v => T + (H - T - B) * (1 - v / mx), xr = i => W - R - (i + 1) * cw + (cw - bw) / 2;
+  const grid = [0, .5, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(mx * f)}" y2="${y(mx * f)}" class="g"/><text x="${W - R + 6}" y="${y(mx * f) + 4}" class="ax">${kfmt(mx * f)}</text>`).join("");
+  const step = Math.ceil(n / 8);
+  const bars = data.map((d, i) => { const h = Math.max(0, (H - T - B) - (y(d.v) - T)), x = xr(i), r = Math.min(4, bw / 2, h);
+    const path = h ? `M${x},${H - B} V${H - B - h + r} Q${x},${H - B - h} ${x + r},${H - B - h} H${x + bw - r} Q${x + bw},${H - B - h} ${x + bw},${H - B - h + r} V${H - B} Z` : "";
+    return `<g class="hit" data-tip="${esc(d.tip)}"><rect x="${W - R - (i + 1) * cw}" y="${T}" width="${cw}" height="${H - T - B}" fill="transparent"/>${path ? `<path d="${path}" class="${d.hi ? "b hi" : "b"}"/>` : ""}</g>${i % step === 0 || i === n - 1 ? `<text x="${x + bw / 2}" y="${H - 6}" class="ax mid">${esc(d.label)}</text>` : ""}`; }).join("");
+  const ref = o.ref ? `<line x1="${L}" x2="${W - R}" y1="${y(o.ref)}" y2="${y(o.ref)}" class="ref"/><text x="${L}" y="${y(o.ref) - 4}" class="ax ref-t">${esc(o.refLabel || "")}</text>` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" class="viz" role="img" aria-label="${esc(o.aria || "")}">${grid}${bars}${ref}</svg>`; }
+/* خطوط تراكمي: نفس المحور لكل الخطوط (فلوس) */
+function linesSvg(series, n, o = {}){
+  const W = 560, H = 180, L = 8, R = 40, T = 12, B = 22, mx = niceMax(Math.max(o.ref || 0, ...series.flatMap(s => s.pts.filter(v => v != null))));
+  const x = i => W - R - (n <= 1 ? 0 : i / (n - 1)) * (W - L - R), y = v => T + (H - T - B) * (1 - v / mx);
+  const grid = [0, .5, 1].map(f => `<line x1="${L}" x2="${W - R}" y1="${y(mx * f)}" y2="${y(mx * f)}" class="g"/><text x="${W - R + 6}" y="${y(mx * f) + 4}" class="ax">${kfmt(mx * f)}</text>`).join("");
+  const lines = series.map(s => { const pts = s.pts.map((v, i) => v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean);
+    const last = s.pts.map((v, i) => [v, i]).filter(p => p[0] != null).at(-1);
+    return `<polyline points="${pts.join(" ")}" class="ln ${s.cls}"/>${last ? `<circle cx="${x(last[1])}" cy="${y(last[0])}" r="4" class="dot ${s.cls}"/>` : ""}`; }).join("");
+  const ref = o.ref ? `<line x1="${L}" x2="${W - R}" y1="${y(o.ref)}" y2="${y(o.ref)}" class="ref"/><text x="${L}" y="${y(o.ref) - 4}" class="ax ref-t">${esc(o.refLabel)}</text>` : "";
+  const hits = Array.from({ length: n }, (_, i) => `<rect class="hit" x="${x(i) - (W - L - R) / Math.max(1, n - 1) / 2}" y="${T}" width="${(W - L - R) / Math.max(1, n - 1)}" height="${H - T - B}" fill="transparent" data-tip="${esc(o.tip(i))}"/>`).join("");
+  const labels = [0, Math.floor((n - 1) / 2), n - 1].map(i => `<text x="${x(i)}" y="${H - 6}" class="ax mid">${i + 1}</text>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" class="viz" role="img" aria-label="${esc(o.aria || "")}">${grid}${ref}${lines}${labels}${hits}</svg>`; }
+
 function summary(box){
-  const m = monthOf(today()), pm = shiftMonth(m, -1);
-  const ex = inMonth(expenses(), m), inc = inMonth(incomes(), m), tot = sum(ex), itot = sum(inc);
-  const d = +today().slice(8), prevSame = sum(inMonth(expenses(), pm).filter(i => +i.date.slice(8) <= d));
-  const diff = prevSame ? (tot - prevSame) / prevSame * 100 : null;
-  const tb = +S.cfg.budget || 0, daysLeft = lastDay(m) - d + 1;
-  const byCat = groupSum(ex, i => i.category); const mx = Math.max(1, ...byCat.map(c => c[1]));
-  const cb = S.cfg.catBudgets || {};
+  const p = S.dash || "this", R = dashRange(p), ex = expenses(), inc = incomes();
+  const cur_ = between(ex, R.from, R.to), prev = between(ex, R.pf, R.pt), ci = between(inc, R.from, R.to);
+  const spent = sum(cur_), pspent = sum(prev), income = sum(ci), net = income - spent;
+  const days = daysBetween(R.from, R.to), avg = spent / days, delta = pspent ? (spent - pspent) / pspent * 100 : null;
+  const tb = +S.cfg.budget || 0, forecast = R.live ? avg * lastDay(R.month) : null;
+  const kpi = (label, val, sub, cls = "") => `<div class="kpi"><span class="tiny">${label}</span><b class="${cls}">${val}</b><span class="tiny">${sub || "&nbsp;"}</span></div>`;
+  // يوم بيوم (للشهر) أو شهر بشهر (للفترات الطويلة)
+  let trend = "";
+  if (R.month) { const n = lastDay(R.month), by = {}; cur_.forEach(i => by[+i.date.slice(8)] = (by[+i.date.slice(8)] || 0) + i.amount);
+    const lim = R.live ? +today().slice(8) : n;
+    trend = barsSvg(Array.from({ length: n }, (_, k) => ({ v: k < lim ? by[k + 1] || 0 : 0, label: String(k + 1), hi: R.live && k + 1 === lim, tip: `${k + 1} ${monthName(R.month, true)}: ${money(by[k + 1] || 0)}` })),
+      { ref: avg, refLabel: "متوسط " + kfmt(avg), aria: "الصرف اليومي" });
+  } else { const ms = []; for (let m = monthOf(R.from); m <= monthOf(R.to); m = shiftMonth(m, 1)) ms.push(m);
+    trend = barsSvg(ms.map(m => ({ v: sum(inMonth(cur_, m)), label: monthName(m, true), hi: m === monthOf(today()), tip: `${monthName(m)}: ${money(sum(inMonth(cur_, m)))}` })), { aria: "الصرف الشهري" }); }
+  // تراكمي مقابل الشهر اللي فات والميزانية
+  let cum = "";
+  if (R.month) { const n = lastDay(R.month), lim = R.live ? +today().slice(8) : n, pmn = monthOf(R.pf), pn = lastDay(pmn);
+    const acc = (list, upto) => { let t = 0; const by = {}; list.forEach(i => by[+i.date.slice(8)] = (by[+i.date.slice(8)] || 0) + i.amount); return Array.from({ length: n }, (_, k) => k < upto ? (t += by[k + 1] || 0) : null); };
+    const a = acc(cur_, lim), b = acc(between(ex, pmn + "-01", `${pmn}-${pn}`), Math.min(n, pn));
+    cum = `<div class="legend"><span><i class="sw cur"></i>${esc(monthName(R.month, true))}</span><span><i class="sw prv"></i>${esc(monthName(pmn, true))}</span>${tb ? `<span><i class="sw rf"></i>الميزانية</span>` : ""}</div>`
+      + linesSvg([{ pts: b, cls: "prv" }, { pts: a, cls: "cur" }], n, { ref: tb, refLabel: tb ? "الميزانية " + kfmt(tb) : "", aria: "الصرف التراكمي", tip: i => `يوم ${i + 1}: ${a[i] != null ? money(a[i]) : "—"} · الشهر اللي فات ${b[i] != null ? money(b[i]) : "—"}` }); }
+  // توزيع الفئات + التغيير عن الفترة اللي فاتت
+  const byCat = groupSum(cur_, i => i.category), pc = Object.fromEntries(groupSum(prev, i => i.category));
+  const comp = byCat.length ? `<div class="stack">${byCat.map(([c, v]) => `<i style="flex:${v};background:${catColor(c)}" data-tip="${esc(c)}: ${money(v)} (${Math.round(v / spent * 100)}%)"></i>`).join("")}</div>
+    <div class="clist">${byCat.map(([c, v]) => { const pv = pc[c] || 0, ch = pv ? (v - pv) / pv * 100 : null, cb = +(S.cfg.catBudgets || {})[c];
+      return `<button class="crow" data-cat="${esc(c)}"><i class="sw" style="background:${catColor(c)}"></i><span class="grow">${esc(c)}${cb ? `<small class="${v > cb ? "neg" : ""}"> · ${Math.round(v / cb * 100)}% من ميزانيتها</small>` : ""}</span><span class="tiny">${Math.round(v / spent * 100)}%</span>${ch !== null ? `<span class="tiny ${ch > 0 ? "neg" : "pos"}">${ch > 0 ? "▲" : "▼"} ${Math.abs(Math.round(ch))}%</span>` : `<span class="tiny">جديد</span>`}<b class="val">${money(v)}</b></button>`; }).join("")}</div>` : `<p class="empty">مفيش مصاريف في الفترة دي</p>`;
+  // أيام الأسبوع: متوسط الصرف لكل يوم
+  const wdSum = Array(7).fill(0), wdCnt = Array(7).fill(0);
+  for (let d = R.from; d <= R.to; d = addDays(d, 1)) wdCnt[wdOf(d)]++;
+  cur_.forEach(i => wdSum[wdOf(i.date)] += i.amount);
+  const wdAvg = wdSum.map((v, k) => wdCnt[k] ? v / wdCnt[k] : 0), wdMax = wdAvg.indexOf(Math.max(...wdAvg));
+  const week = barsSvg(wdAvg.map((v, k) => ({ v, label: WD[k], hi: k === wdMax && v > 0, tip: `${WD[k]}: متوسط ${money(v)}` })), { h: 140, aria: "متوسط الصرف حسب يوم الأسبوع" });
+  // ملاحظات ذكية
+  const tips = [], big = cur_.slice().sort((a, b) => b.amount - a.amount)[0];
+  if (delta !== null && Math.abs(delta) >= 5) tips.push([delta > 0 ? "▲" : "▼", `صرفت ${Math.abs(Math.round(delta))}% ${delta > 0 ? "أكتر" : "أقل"} من ${p === "this" ? "نفس الوقت الشهر اللي فات" : "الفترة اللي قبلها"} (${money(pspent)}).`, delta > 0 ? "neg" : "pos"]);
+  if (forecast) tips.push(["◷", `بالمعدل ده هتقفل الشهر على حوالي ${money(forecast)}${tb ? (forecast > tb ? ` — يعني هتعدّي الميزانية بـ ${money(forecast - tb)}` : ` — جوه الميزانية بفرق ${money(tb - forecast)}`) : ""}.`, tb && forecast > tb ? "neg" : ""]);
+  const jump = byCat.map(([c, v]) => [c, v, pc[c] || 0]).filter(([, v, pv]) => pv > 0 && v - pv > Math.max(100, pv * .3)).sort((a, b) => (b[1] - b[2]) - (a[1] - a[2]))[0];
+  if (jump) tips.push(["!", `«${jump[0]}» زادت ${money(jump[1] - jump[2])} عن الفترة اللي فاتت.`, "neg"]);
+  if (byCat[0] && spent) tips.push(["◔", `«${byCat[0][0]}» واخدة ${Math.round(byCat[0][1] / spent * 100)}% من مصاريفك.`, ""]);
+  if (big) tips.push(["$", `أكبر مصروف: «${big.title}» ${money(big.amount)} — ${dayName(big.date)}.`, ""]);
+  if (wdAvg[wdMax] > 0) tips.push(["◷", `${WD[wdMax]} هو أكتر يوم بتصرف فيه (متوسط ${money(wdAvg[wdMax])}).`, ""]);
+  const zero = (() => { let z = 0; const set = new Set(cur_.map(i => i.date)); for (let d = R.from; d <= R.to; d = addDays(d, 1)) if (!set.has(d)) z++; return z; })();
+  if (zero && cur_.length) tips.push(["✓", `${zero} يوم من غير ولا مصروف.`, "pos"]);
+  if (income) tips.push([net >= 0 ? "✓" : "!", net >= 0 ? `وفّرت ${Math.round(net / income * 100)}% من دخلك (${money(net)}).` : `صرفت ${money(-net)} أكتر من دخلك.`, net >= 0 ? "pos" : "neg"]);
+
   box.innerHTML = `
-   <div class="stats">
-     <div class="stat"><span class="tiny">صرفت في ${esc(monthName(m, true))}</span><b class="neg">${money(tot)}</b>${diff !== null ? `<span class="tiny ${diff > 0 ? "neg" : "pos"}">${pct(diff)} عن نفس الوقت الشهر اللي فات</span>` : `<span class="tiny">النهارده ${money(sum(ex.filter(i => i.date === today())))}</span>`}</div>
-     <div class="stat"><span class="tiny">${itot ? "الدخل · الباقي" : "متوسط اليوم"}</span><b class="${itot ? (itot - tot >= 0 ? "pos" : "neg") : ""}">${itot ? money(itot - tot) : money(tot / d)}</b><span class="tiny">${itot ? `دخل ${money(itot)}` : `النهارده ${money(sum(ex.filter(i => i.date === today())))}`}</span></div>
+   <div class="seg" data-dash>${DASH.map(([k, l]) => `<button data-p="${k}" aria-pressed="${k === p}">${l}</button>`).join("")}</div>
+   <div class="kpis">
+     ${kpi("المصروف", money(spent), delta !== null ? `<span class="${delta > 0 ? "neg" : "pos"}">${delta > 0 ? "▲" : "▼"} ${Math.abs(Math.round(delta))}%</span> عن اللي قبلها` : "", "")}
+     ${kpi(forecast ? "المتوقع لآخر الشهر" : "متوسط اليوم", money(forecast || avg), forecast ? `متوسط اليوم ${money(avg)}` : `${days} يوم`, forecast && tb && forecast > tb ? "neg" : "")}
+     ${kpi("الدخل", money(income), income ? `الصافي <span class="${net >= 0 ? "pos" : "neg"}">${money(net)}</span>` : "سجّل دخلك من «سجّل ← دخل»")}
+     ${kpi(tb && R.month ? "الميزانية" : "نسبة الادخار", tb && R.month ? `${Math.round(spent / tb * 100)}%` : income ? `${Math.round(net / income * 100)}%` : "—", tb && R.month ? (spent > tb ? `عدّيت بـ ${money(spent - tb)}` : `فاضل ${money(tb - spent)}`) : "من الدخل", tb && R.month && spent > tb ? "neg" : "")}
    </div>
-   ${tb ? `<section class="card budget"><div class="row-h"><b>ميزانية الشهر</b><span class="tiny">${money(tot)} من ${money(tb)}</span></div>
-     <div class="track big"><i class="${tot > tb ? "over" : tot > tb * .8 ? "warn" : ""}" style="width:${Math.min(100, tot / tb * 100)}%"></i></div>
-     <p class="tiny">${tot > tb ? `عدّيتها بـ ${money(tot - tb)}` : `فاضل ${money(tb - tot)} · تقدر تصرف ${money((tb - tot) / daysLeft)} في اليوم لآخر الشهر`}</p></section>` : ""}
-   <section class="card"><div class="row-h"><b>صرفت فين الشهر ده</b><button class="link" data-st-month>كشف الحساب ←</button></div>
-     ${byCat.length ? byCat.map(([c, v]) => `<button class="bar" data-cat="${esc(c)}"><span>${esc(c)}</span><span class="track"><i class="${cb[c] && v > cb[c] ? "over" : ""}" style="width:${Math.max(3, v / mx * 100)}%"></i></span><span class="val">${money(v)}${cb[c] ? `<small> / ${money(cb[c])}</small>` : ""}</span></button>`).join("") : `<p class="empty">لسه مسجّلتش مصاريف الشهر ده</p>`}</section>
-   <section class="card"><div class="row-h"><b>آخر حاجات</b><button class="link" data-st-all>الكل ←</button></div>${rows(S.items.slice(0, 8), true) || `<p class="empty">لسه مفيش حاجة</p>`}</section>`;
-  box.querySelector("[data-st-month]").onclick = () => go("statement", { from: m + "-01", to: today(), cat: "", type: "", q: "", group: "cat" });
-  box.querySelector("[data-st-all]").onclick = () => go("statement", { from: m + "-01", to: today(), cat: "", type: "", q: "", group: "day" });
-  box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => go("statement", { from: m + "-01", to: today(), cat: b.dataset.cat, type: "expense", q: "", group: "day" }));
+   ${tips.length ? `<section class="card insights"><h3>ملاحظات</h3>${tips.slice(0, 6).map(([ic, t, c]) => `<p><span class="ii ${c}">${ic}</span>${esc(t)}</p>`).join("")}</section>` : ""}
+   <section class="card"><div class="row-h"><h3>${R.month ? "الصرف يوم بيوم" : "الصرف شهر بشهر"}</h3><span class="tiny">${esc(fmtDate(R.from))} ← ${esc(fmtDate(R.to))}</span></div>${trend}</section>
+   ${cum ? `<section class="card"><h3>الصرف التراكمي</h3>${cum}</section>` : ""}
+   <section class="card"><div class="row-h"><h3>صرفت فين</h3><button class="link" data-st>كشف الحساب ←</button></div>${comp}</section>
+   <section class="card"><h3>أيام الأسبوع</h3><p class="tiny">متوسط اللي بتصرفه في كل يوم</p>${week}</section>
+   ${cur_.length ? `<section class="card"><h3>أكبر ٥ مصاريف</h3>${rows(cur_.slice().sort((a, b) => b.amount - a.amount).slice(0, 5), true)}</section>` : ""}`;
+  box.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { S.dash = b.dataset.p; renderData(); });
+  box.querySelector("[data-st]").onclick = () => go("statement", { from: R.from, to: R.to, cat: "", type: "expense", q: "", group: "cat" });
+  box.querySelectorAll("[data-cat]").forEach(b => b.onclick = () => go("statement", { from: R.from, to: R.to, cat: b.dataset.cat, type: "expense", q: "", group: "day" }));
   bindRows(box);
 }
+/* تلميح الرسوم: يظهر جنب الماوس أو الصباع */
+{ const tip = document.createElement("div"); tip.className = "viz-tip"; tip.hidden = true; document.body.appendChild(tip);
+  const show = e => { const t = e.target.closest?.("[data-tip]"); if (!t || !root.contains(t)) { tip.hidden = true; return; } tip.textContent = t.dataset.tip; tip.hidden = false;
+    const x = Math.min(innerWidth - tip.offsetWidth - 8, Math.max(8, e.clientX - tip.offsetWidth / 2)); tip.style.left = x + "px"; tip.style.top = Math.max(8, e.clientY - tip.offsetHeight - 14) + "px"; };
+  document.addEventListener("pointermove", show); document.addEventListener("pointerdown", show); document.addEventListener("scroll", () => tip.hidden = true, true); }
 const groupSum = (list, key) => { const o = {}; list.forEach(i => { const k = key(i); o[k] = (o[k] || 0) + (+i.amount || 0); }); return Object.entries(o).sort((a, b) => b[1] - a[1]); };
 function rows(list, withDate){ return list.map(i => `<button class="row item" data-edit="${esc(i.id)}"><div class="grow"><b>${esc(i.title)}</b><span class="tiny">${esc(i.category)}${withDate ? " · " + esc(dayName(i.date)) : ""}${i.note ? " · " + esc(i.note) : ""}${i.createdAt ? ` · <span class="added">اتضاف ${esc(addedAt(i))}</span>` : ""}</span></div><span class="val ${i.type === "income" ? "pos" : ""}">${i.type === "income" ? "+" : ""}${money(i.amount)}</span></button>`).join(""); }
 function bindRows(box){ box.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => editItem(b.dataset.edit)); }
